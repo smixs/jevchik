@@ -5,7 +5,17 @@ import { TelegramError, type ChatMemberInfo, type ChatPermissions, type InlineBu
 import { getSettings } from './settings/settings.js'
 import { karmaTag } from './text.js'
 
-type OpKind = 'delete_message' | 'restrict' | 'ban' | 'unban' | 'send_message' | 'edit_message' | 'set_reaction' | 'set_tag'
+type OpKind =
+  | 'delete_message'
+  | 'restrict'
+  | 'ban'
+  | 'unban'
+  | 'ban_sender_chat'
+  | 'unban_sender_chat'
+  | 'send_message'
+  | 'edit_message'
+  | 'set_reaction'
+  | 'set_tag'
 type OpStatus = 'pending' | 'running' | 'completed' | 'failed' | 'outcome_unknown'
 
 interface OpPayload {
@@ -45,8 +55,11 @@ const LEASE_MS = 5 * 60_000
 const GROUP_SENDS_PER_MINUTE = 20
 const TAG_CALLS_PER_MINUTE = 20
 
-/** Who may get a karma tag (section 3.12): not a bot, not an administrator or the owner, still in the chat, not refused by Telegram. */
-export const TAG_ELIGIBLE = `NOT m.is_bot AND m.tag_exempt IS NULL AND COALESCE(m.status, 'member') NOT IN ('creator', 'administrator', 'left', 'kicked')`
+/**
+ * Who may get a karma tag (section 3.12): not a bot, not a channel (section 3.6.4), not an administrator or the owner, still in the
+ * chat, not refused by Telegram.
+ */
+export const TAG_ELIGIBLE = `NOT m.is_bot AND NOT m.is_channel AND m.tag_exempt IS NULL AND COALESCE(m.status, 'member') NOT IN ('creator', 'administrator', 'left', 'kicked')`
 
 export const NO_PERMISSIONS: ChatPermissions = {
   can_send_messages: false,
@@ -295,34 +308,34 @@ function retryDelay(op: Row, attempts: number, result: Record<string, unknown> |
   return 2 ** attempts * 1000
 }
 
-async function perform(ctx: Ctx, op: Row): Promise<Record<string, unknown> | null> {
-  const p = op.payload as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
-  switch (op.operation_kind as OpKind) {
-    case 'delete_message':
-      await ctx.tg.deleteMessage(op.chat_id, p.messageId)
-      return null
-    case 'restrict':
-      await ctx.tg.restrictChatMember(op.chat_id, p.userId, p.permissions, p.untilDate)
-      return null
-    case 'ban':
-      await ctx.tg.banChatMember(op.chat_id, p.userId)
-      return null
-    case 'unban':
-      await ctx.tg.unbanChatMember(op.chat_id, p.userId)
-      return null
-    case 'send_message': {
-      const sent = await ctx.tg.sendMessage(p.to ?? op.chat_id, p.text, { buttons: p.buttons, entities: p.entities })
-      return { message_id: sent.message_id }
-    }
-    case 'edit_message':
-      await ctx.tg.editMessageText(p.to, p.messageId, p.text, { buttons: p.buttons, entities: p.entities })
-      return null
-    case 'set_reaction':
-      await ctx.tg.setMessageReaction(op.chat_id, p.messageId, p.emoji)
-      return null
-    case 'set_tag':
-      return performTag(ctx, op)
-  }
+type Payload = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+type Performer = (ctx: Ctx, op: Row, p: Payload) => Promise<Record<string, unknown> | null>
+
+/** A call that returns nothing to keep. */
+async function nothing(call: Promise<void>): Promise<null> {
+  await call
+  return null
+}
+
+/** The Telegram call of each kind of operation, with what it returns to keep. */
+const PERFORMERS: Record<OpKind, Performer> = {
+  delete_message: (ctx, op, p) => nothing(ctx.tg.deleteMessage(op.chat_id, p.messageId)),
+  restrict: (ctx, op, p) => nothing(ctx.tg.restrictChatMember(op.chat_id, p.userId, p.permissions, p.untilDate)),
+  ban: (ctx, op, p) => nothing(ctx.tg.banChatMember(op.chat_id, p.userId)),
+  unban: (ctx, op, p) => nothing(ctx.tg.unbanChatMember(op.chat_id, p.userId)),
+  ban_sender_chat: (ctx, op, p) => nothing(ctx.tg.banChatSenderChat(op.chat_id, p.userId)),
+  unban_sender_chat: (ctx, op, p) => nothing(ctx.tg.unbanChatSenderChat(op.chat_id, p.userId)),
+  send_message: async (ctx, op, p) => {
+    const sent = await ctx.tg.sendMessage(p.to ?? op.chat_id, p.text, { buttons: p.buttons, entities: p.entities })
+    return { message_id: sent.message_id }
+  },
+  edit_message: (ctx, _op, p) => nothing(ctx.tg.editMessageText(p.to, p.messageId, p.text, { buttons: p.buttons, entities: p.entities })),
+  set_reaction: (ctx, op, p) => nothing(ctx.tg.setMessageReaction(op.chat_id, p.messageId, p.emoji)),
+  set_tag: (ctx, op) => performTag(ctx, op),
+}
+
+function perform(ctx: Ctx, op: Row): Promise<Record<string, unknown> | null> {
+  return PERFORMERS[op.operation_kind as OpKind](ctx, op, op.payload as Payload)
 }
 
 const failed = (code: string): OpOutcome => ({ status: 'failed', code, result: null })

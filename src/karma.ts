@@ -4,7 +4,7 @@ import type { Q } from './db.js'
 import { createFlow } from './flows.js'
 import { streakBoost } from './formulas.js'
 import { addKarma, type KarmaResult } from './ledger.js'
-import { isObserving } from './members.js'
+import { isChannelId, isObserving } from './members.js'
 import type { SettingsView } from './settings/settings.js'
 import { queueTag } from './tags.js'
 import { previousWeekStart, weekKey, weekStart } from './time.js'
@@ -84,8 +84,12 @@ async function punishmentSkipped(q: Q, a: AwardArgs, level: number): Promise<voi
   })
 }
 
-/** Punishments apply at the moment karma crosses a threshold downwards; leaving the zone restores rights. */
+/**
+ * Punishments apply at the moment karma crosses a threshold downwards; leaving the zone restores rights. A channel is never
+ * punished for its karma (section 3.6.4).
+ */
 async function onCrossing(q: Q, a: AwardArgs, result: KarmaResult): Promise<void> {
+  if (isChannelId(a.userId)) return
   const before = punishLevel(result.before, a.settings)
   const after = punishLevel(result.after, a.settings)
   if (before === after || (after > 0 && after < before)) return

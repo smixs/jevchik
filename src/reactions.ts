@@ -137,9 +137,10 @@ async function removeReaction(rc: ReactionCtx, type: string): Promise<void> {
   )
 }
 
+/** A reaction to oneself changes nothing (F3), for a channel reacting to its own post too (section 3.6.4). */
 function actorOf(update: MessageReactionUpdated, target: Target): { kind: 'user' | 'chat'; id: number } | null {
-  if (update.user) return update.user.id === target.authorId ? null : { kind: 'user', id: update.user.id }
-  return update.actor_chat ? { kind: 'chat', id: update.actor_chat.id } : null
+  const actor = update.user ? { kind: 'user' as const, id: update.user.id } : update.actor_chat ? { kind: 'chat' as const, id: update.actor_chat.id } : null
+  return actor && actor.id !== target.authorId ? actor : null
 }
 
 export async function handleReaction(q: Q, settings: SettingsView, update: MessageReactionUpdated, now: Date): Promise<void> {

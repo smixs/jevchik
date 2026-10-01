@@ -5,11 +5,10 @@ import { DAY_MS, type Ctx } from './ctx.js'
 import type { Facts } from './jev/facts.js'
 import type { Q } from './db.js'
 import { createFlow, registerFlow, type Flow, type StepResult } from './flows.js'
-import { getKarma } from './members.js'
+import { authorOf, getKarma, isChannelId, replyOf, type Author } from './members.js'
 import { execOp, type OpOutcome } from './ops.js'
 import { withRetry } from './retry.js'
 import type { SettingsView } from './settings/settings.js'
-import { displayName, fromPerson, replyOf } from './members.js'
 
 export function isReportCommand(msg: Message): boolean {
   const entity = msg.entities?.find((e) => e.type === 'bot_command' && e.offset === 0)
@@ -22,11 +21,24 @@ interface Registered {
   privileged: boolean
 }
 
-async function registerReport(q: Q, msg: Message, settings: SettingsView, now: Date): Promise<Registered> {
+/** The command and the member who sent it: a person or a channel (section 3.6.4). */
+export interface ReportCommand {
+  msg: Message
+  reporterId: number
+}
+
+/** Section 3.6.4: a message of a channel is a member's message and may be reported; other messages not by members may not. */
+function targetAuthor(msg: Message): Author | null {
   const target = replyOf(msg)
-  if (!target?.from || !fromPerson(target as Message)) return { reportId: null, privileged: false }
+  return target ? authorOf(target as Message) : null
+}
+
+async function registerReport(q: Q, cmd: ReportCommand, settings: SettingsView, now: Date): Promise<Registered> {
+  const { msg, reporterId } = cmd
+  const target = replyOf(msg)
+  const author = targetAuthor(msg)
+  if (!target || !author) return { reportId: null, privileged: false }
   const chatId = msg.chat.id
-  const reporterId = msg.from!.id
   const since = new Date(now.getTime() - DAY_MS)
   const recent = await q.query('SELECT count(*)::int AS n FROM reports WHERE chat_id = $1 AND reporter_id = $2 AND created_at >= $3', [chatId, reporterId, since])
   const privileged = (await getKarma(q, chatId, reporterId)) >= settings.num('protect_threshold')
@@ -34,7 +46,7 @@ async function registerReport(q: Q, msg: Message, settings: SettingsView, now: D
   const created = await q.query(
     `INSERT INTO reports (chat_id, target_message_id, target_user_id, reporter_id, privileged, status, created_at)
      VALUES ($1,$2,$3,$4,$5,'pending',$6) ON CONFLICT (chat_id, target_message_id) DO NOTHING RETURNING report_id`,
-    [chatId, target.message_id, target.from.id, reporterId, privileged, now],
+    [chatId, target.message_id, author.id, reporterId, privileged, now],
   )
   return { reportId: created[0]?.report_id ?? null, privileged }
 }
@@ -49,11 +61,12 @@ export function attachmentKind(msg: Message): string | null {
 /** Keeps the text of the message a command answers, by the rule for deleted spam (section 3.10). */
 async function holdRepliedText(q: Q, msg: Message, keep: { reason: 'report'; days: number; now: Date }): Promise<void> {
   const target = replyOf(msg) as Message
+  const author = authorOf(target) as Author
   await holdText(q, {
     chatId: msg.chat.id,
     messageId: target.message_id,
-    authorId: target.from!.id,
-    authorName: displayName(target.from!),
+    authorId: author.id,
+    authorName: author.name,
     text: target.text ?? target.caption ?? '',
     mediaKind: attachmentKind(target),
     reason: keep.reason,
@@ -63,11 +76,13 @@ async function holdRepliedText(q: Q, msg: Message, keep: { reason: 'report'; day
 }
 
 /** Registers a report inside the ingest transaction; everything that needs Telegram runs as a flow. */
-export async function startReport(ctx: Ctx, q: Q, msg: Message, settings: SettingsView): Promise<void> {
+export async function startReport(ctx: Ctx, q: Q, cmd: ReportCommand, settings: SettingsView): Promise<void> {
   const now = ctx.clock.now()
+  const { msg } = cmd
   const chatId = msg.chat.id
   const target = replyOf(msg)
-  const { reportId, privileged } = await registerReport(q, msg, settings, now)
+  const author = targetAuthor(msg)
+  const { reportId, privileged } = await registerReport(q, cmd, settings, now)
   if (reportId !== null) await holdRepliedText(q, msg, { reason: 'report', days: settings.num('held_text_days'), now })
   await createFlow(q, {
     chatId,
@@ -80,8 +95,8 @@ export async function startReport(ctx: Ctx, q: Q, msg: Message, settings: Settin
       reportId,
       privileged,
       targetMessageId: target?.message_id ?? null,
-      targetUserId: target?.from?.id ?? null,
-      targetName: target?.from ? displayName(target.from) : null,
+      targetUserId: author?.id ?? null,
+      targetName: author?.name ?? null,
       targetSentAt: target ? new Date(target.date * 1000).toISOString() : null,
     },
     now,
@@ -97,8 +112,9 @@ async function reject(ctx: Ctx, flow: Flow): Promise<void> {
   }
 }
 
+/** A report on an admin is refused; a channel has no role in the group to check (section 3.6.4). */
 async function adminCheck(ctx: Ctx, flow: Flow): Promise<StepResult> {
-  if (flow.data.rejected) return 'ok'
+  if (flow.data.rejected || isChannelId(flow.data.targetUserId)) return 'ok'
   try {
     const member = await withRetry(ctx, () => ctx.tg.getChatMember(flow.chatId, flow.data.targetUserId))
     if (member.status === 'creator' || member.status === 'administrator') await reject(ctx, flow)

@@ -40,9 +40,38 @@ function isServiceMessage(msg: Message): boolean {
  * Spec 3.6.0: a message written by a person. Not a bot, not on behalf of a chat or a channel (sender_chat), not a post
  * auto-forwarded from the linked channel, not Telegram's service account, not a service message.
  */
-export function fromPerson(msg: Message): boolean {
+function fromPerson(msg: Message): boolean {
   if (!msg.from || msg.from.is_bot || msg.from.id === TELEGRAM_SERVICE_ID) return false
   return !msg.sender_chat && !msg.is_automatic_forward && !isServiceMessage(msg)
+}
+
+/** The member who wrote a message: a person, or a channel writing in the group (section 3.6.4). */
+export interface Author {
+  id: number
+  name: string
+  username: string | null
+  isChannel: boolean
+}
+
+/**
+ * Section 3.6.4: a channel author is a `sender_chat` other than the group itself, without `is_automatic_forward`. A post
+ * auto-forwarded from the linked channel and an anonymous admin (on behalf of the group) are nobody's, as before.
+ */
+function channelAuthor(msg: Message): Author | null {
+  const chat = msg.sender_chat
+  if (!chat || chat.id === msg.chat.id || msg.is_automatic_forward || isServiceMessage(msg)) return null
+  const title = 'title' in chat ? chat.title : undefined
+  return { id: chat.id, name: title || chat.username || String(chat.id), username: chat.username ?? null, isChannel: true }
+}
+
+export function authorOf(msg: Message): Author | null {
+  if (fromPerson(msg)) return { id: msg.from!.id, name: displayName(msg.from!), username: msg.from!.username ?? null, isChannel: false }
+  return channelAuthor(msg)
+}
+
+/** A channel member has the negative id of its chat; a person's id is positive (section 3.6.4). */
+export function isChannelId(userId: number): boolean {
+  return userId < 0
 }
 
 /**
@@ -75,6 +104,19 @@ export async function upsertMember(q: Q, chatId: number, user: TgUser, now: Date
     `INSERT INTO members (chat_id, user_id, display_name, username, is_bot, created_at) VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT (chat_id, user_id) DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username`,
     [chatId, user.id, displayName(user), user.username ?? null, user.is_bot ?? false, now],
+  )
+}
+
+/**
+ * The author of a message as a member. Section 3.6.4: a channel has no join to see, so a channel first seen in a live message
+ * of its own is marked as joined then (a newcomer); one known before, or from an imported history, is not.
+ */
+export async function upsertAuthor(q: Q, chatId: number, author: Author, at: { now: Date; live: boolean }): Promise<void> {
+  const joined = author.isChannel && at.live ? at.now : null
+  await q.query(
+    `INSERT INTO members (chat_id, user_id, display_name, username, is_channel, joined_seen_at, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (chat_id, user_id) DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username`,
+    [chatId, author.id, author.name, author.username, author.isChannel, joined, at.now],
   )
 }
 

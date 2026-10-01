@@ -62,7 +62,7 @@ describe('parsing helpers', () => {
     expect(exportIdMatches(-1001234567890, 0)).toBe(false)
   })
 
-  it('reads plain and rich text, keeps only user messages', () => {
+  it('reads plain and rich text, keeps user and channel messages (section 3.6.4: channel<id> is the channel -100<id>)', () => {
     const parsed = parseExport(
       JSON.stringify({
         id: 1,
@@ -74,10 +74,10 @@ describe('parsing helpers', () => {
         ],
       }),
     )
-    expect(parsed?.messages.map((m) => [m.id, m.authorId, m.text])).toEqual([[1, 7, 'plain'], [2, 8, 'see https://x.y']])
+    expect(parsed?.messages.map((m) => [m.id, m.authorId, m.text])).toEqual([[1, 7, 'plain'], [2, 8, 'see https://x.y'], [4, -10055, 'x']])
     expect(parseExport('not json')).toBeNull()
     expect(parseExport('{"id":"x"}')).toBeNull()
-    expect(windowOf(parsed!.messages, new Date(1788264100 * 1000), 90)).toHaveLength(2)
+    expect(windowOf(parsed!.messages, new Date(1788264100 * 1000), 90)).toHaveLength(3)
   })
 })
 

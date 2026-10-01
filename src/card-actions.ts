@@ -53,6 +53,8 @@ function steamParts(ops: Ops, data: Flow['data']): Parts {
   halted(parts, data)
   step(parts, ops.get('delete'), ['сообщение удалено', 'сообщение удалить не смог'])
   step(parts, ops.get('restrict'), ['участник заглушён', 'заглушить участника не смог'])
+  // Section 3.6.4: a channel is banned instead of being muted.
+  step(parts, ops.get('ban'), ['участник забанен', 'забанить участника не смог'])
   return parts
 }
 

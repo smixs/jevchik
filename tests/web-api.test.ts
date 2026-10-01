@@ -116,6 +116,7 @@ describe('F16: data of the leaderboard and the personal page', () => {
       empty: false,
       name: 'Alice',
       hidden: false,
+      is_channel: false,
       karma: 12.5,
       place: 1,
       week_delta: 5,
@@ -166,7 +167,7 @@ describe('F16: data of the leaderboard and the personal page', () => {
     const response = await get(web, '/api/me', VECTORS.outsider_lb)
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
-      empty: true, name: 'Outsider', hidden: false, karma: 0, place: null, week_delta: 0, chart: [], thanks_count: 0, answers_count: 0,
+      empty: true, name: 'Outsider', hidden: false, is_channel: false, karma: 0, place: null, week_delta: 0, chart: [], thanks_count: 0, answers_count: 0,
       caught_spammers_count: 0, streak_weeks: 0, decay_warning: null, messages: { latest: [], top_upvoted: [], most_replied: [] },
     })
     const carol = await json(await get(web, '/api/leaderboard?period=all', VECTORS.bob_lb))

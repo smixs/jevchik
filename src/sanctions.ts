@@ -4,6 +4,7 @@ import { HOUR_MS } from './ctx.js'
 import type { Q } from './db.js'
 import { createCard, type CardKind, type CardPayload } from './cards.js'
 import { createFlow, registerFlow, type Flow, type Step, type StepResult } from './flows.js'
+import { isChannelId } from './members.js'
 import { ALL_PERMISSIONS, execOp, NO_PERMISSIONS, TEXT_ONLY_PERMISSIONS, type OpOutcome } from './ops.js'
 import type { ChatPermissions } from './ports.js'
 import { withRetry } from './retry.js'
@@ -78,6 +79,7 @@ export function decide(i: DecideInput): Decision {
 const STEP_WORDS: Array<[step: string, done: string, failed: string]> = [
   ['delete', 'удалил сообщение', 'удалить сообщение не смог'],
   ['restrict', 'ограничил участника', 'ограничить участника не смог'],
+  ['ban', 'забанил участника', 'забанить участника не смог'],
 ]
 
 /** Section 3.6.1: what the flow did to the message and its author so far, from the states of its operations. */
@@ -111,8 +113,17 @@ type Role = 'admin' | 'member' | 'unknown'
 
 const ROLE_CHECKS = 3
 
-/** "Cannot tell" is its own answer: only a successful answer with a non-administrator status may be sanctioned. */
+/** A channel member (section 3.6.4): banned as a sender chat, never asked for a role, never restricted. */
+function channelTarget(flow: Flow): boolean {
+  return isChannelId(flow.data.userId)
+}
+
+/**
+ * "Cannot tell" is its own answer: only a successful answer with a non-administrator status may be sanctioned. A channel has no
+ * role in the group: the check "the target is an admin" does not apply to it (section 3.6.4).
+ */
 export async function targetRole(ctx: Ctx, flow: Flow): Promise<Role> {
+  if (channelTarget(flow)) return 'member'
   try {
     const member = await withRetry(ctx, () => ctx.tg.getChatMember(flow.chatId, flow.data.userId))
     return member.status === 'creator' || member.status === 'administrator' ? 'admin' : 'member'
@@ -171,7 +182,9 @@ export async function deleteStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
   return 'ok'
 }
 
+/** The sanction of the steam room: a person is restricted; a channel is banned in the group at once (section 3.6.4). */
 async function restrictStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
+  if (channelTarget(flow)) return banCall(ctx, flow)
   const outcome = await execOp(ctx, {
     chatId: flow.chatId,
     key: `${flow.key}:restrict`,
@@ -190,6 +203,7 @@ function failureCard(code: string | null): CardKind {
 }
 
 async function recordStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
+  if (channelTarget(flow)) return adminBanRecord(ctx, flow)
   const settings = await getSettings(ctx.db, flow.chatId, flow.settingsSeq)
   const d = flow.data
   const until = new Date(flow.createdAt.getTime() + settings.num('steam_hours') * HOUR_MS)
@@ -208,14 +222,11 @@ function appealUrl(ctx: Ctx, chatId: number): string {
   return `https://t.me/${ctx.env.botUsername}?startapp=appeal_${chatId}`
 }
 
+/** The joke with the appeal button; a channel has no appeal, so its joke goes without one (section 3.6.4). */
 async function sendStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
   const text = loadJokes().replies[flow.data.jokeIdx].replaceAll('{name}', flow.data.name)
-  const outcome = await execOp(ctx, {
-    chatId: flow.chatId,
-    key: `${flow.key}:send`,
-    kind: 'send_message',
-    payload: { text, buttons: [[{ text: 'Я не спамер', url: appealUrl(ctx, flow.chatId) }]] },
-  })
+  const buttons = channelTarget(flow) ? undefined : [[{ text: 'Я не спамер', url: appealUrl(ctx, flow.chatId) }]]
+  const outcome = await execOp(ctx, { chatId: flow.chatId, key: `${flow.key}:send`, kind: 'send_message', payload: { text, buttons } })
   return waiting(outcome) ? 'wait' : 'ok'
 }
 
@@ -242,7 +253,7 @@ export async function banCall(ctx: Ctx, flow: Flow): Promise<StepResult> {
   const outcome = await execOp(ctx, {
     chatId: flow.chatId,
     key: `${flow.key}:ban`,
-    kind: 'ban',
+    kind: channelTarget(flow) ? 'ban_sender_chat' : 'ban',
     payload: { userId: flow.data.userId, banId: flow.data.banId },
   })
   if (waiting(outcome)) return 'wait'
@@ -277,7 +288,8 @@ export async function liftStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
     if (!permissions) return 'wait'
     outcome = await execOp(ctx, { chatId: flow.chatId, key: `${flow.key}:lift`, kind: 'restrict', payload: { userId: flow.data.userId, permissions } })
   } else {
-    outcome = await execOp(ctx, { chatId: flow.chatId, key: `${flow.key}:lift`, kind: 'unban', payload: { userId: flow.data.userId } })
+    const kind = channelTarget(flow) ? 'unban_sender_chat' : 'unban'
+    outcome = await execOp(ctx, { chatId: flow.chatId, key: `${flow.key}:lift`, kind, payload: { userId: flow.data.userId } })
   }
   if (waiting(outcome)) return 'wait'
   return outcome.status === 'completed' ? 'ok' : 'stop'

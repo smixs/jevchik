@@ -6,7 +6,6 @@ import { ADMIN, BOB, CAROL, CHAT, command, createHarness, message, pastObservati
 
 const SPAM = 'Заработай 500 долларов в день без вложений, пиши в личку!'
 const TELEGRAM: User = { id: 777000, first_name: 'Telegram' }
-const CHANNEL_BOT: User = { id: 136817688, first_name: 'Channel', is_bot: true }
 const CHANNEL = { id: -1005550001111, type: 'channel', title: 'Канал чата' }
 let h: Harness
 
@@ -35,8 +34,8 @@ describe('a post auto-forwarded from the linked channel', () => {
     expect(await h.db.query('SELECT 1 FROM admin_cards')).toEqual([])
   })
 
-  it('a message on behalf of a chat or a channel (sender_chat) is not judged either', async () => {
-    await h.send(message({ id: 701, from: CHANNEL_BOT, text: SPAM, extra: { sender_chat: CHANNEL } }))
+  // Section 3.6.4: a channel writing in the group is a member (tests/channels.test.ts); the group itself is not.
+  it('a message on behalf of the group itself (an anonymous admin) is not judged either', async () => {
     await h.send(message({ id: 702, from: { id: 1087968824, first_name: 'Group', is_bot: true }, text: SPAM, extra: { sender_chat: { id: CHAT, type: 'supergroup', title: 'c' } } }))
     await h.app.settle()
     expect(sanctions()).toEqual([])

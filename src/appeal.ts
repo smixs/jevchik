@@ -7,6 +7,7 @@ import { startUnban } from './sanctions.js'
 import { getSettings } from './settings/settings.js'
 import { graphemeLength } from './text.js'
 import { extractAppeal } from './appeal-answer.js'
+import { isChannelId } from './members.js'
 
 const APPEAL_MAX_CHARS = 500
 const CLAIM_TIMEOUT_MS = 2 * 60_000
@@ -95,6 +96,11 @@ async function verdict(ctx: Ctx, who: { chatId: number; userId: number; ban: Ban
   return { status: 'review' }
 }
 
+/** One appeal per member, after the first bath only; a channel has no appeal in the Mini App (section 3.6.4). */
+function appealAllowed(ban: BanRow, userId: number): boolean {
+  return ban.bans_count <= 1 && !isChannelId(userId)
+}
+
 async function release(ctx: Ctx, ban: BanRow): Promise<void> {
   await ctx.db.query(`UPDATE bans SET appeal_status = 'none' WHERE ban_id = $1 AND appeal_status = 'evaluating'`, [ban.ban_id])
 }
@@ -106,7 +112,7 @@ export async function submitAppeal(ctx: Ctx, chatId: number, userId: number, raw
   if (length > APPEAL_MAX_CHARS) return { status: 'invalid', reason: 'too_long' }
   const ban = await loadBan(ctx, chatId, userId)
   if (!ban) return { status: 'no_ban' }
-  if (ban.bans_count > 1) return { status: 'not_allowed' }
+  if (!appealAllowed(ban, userId)) return { status: 'not_allowed' }
   if (ban.appeal_status === 'accepted') return resumeAccepted(ctx, chatId, userId, ban)
   if (ban.appeal_status === 'rejected') return { status: 'rejected' }
   if (ban.appeal_status === 'review') return { status: 'review' }
@@ -122,5 +128,5 @@ export async function submitAppeal(ctx: Ctx, chatId: number, userId: number, raw
 export async function appealState(ctx: Ctx, chatId: number, userId: number): Promise<{ status: string; allowed: boolean }> {
   const ban = await loadBan(ctx, chatId, userId)
   if (!ban) return { status: 'no_ban', allowed: false }
-  return { status: ban.appeal_status, allowed: ban.bans_count <= 1 && ban.appeal_status === 'none' }
+  return { status: ban.appeal_status, allowed: appealAllowed(ban, userId) && ban.appeal_status === 'none' }
 }

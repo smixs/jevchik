@@ -6,7 +6,7 @@ import { enqueueEvaluation } from './evaluation.js'
 import { senderHistory } from './jev/history.js'
 import type { JevState } from './jev/state.js'
 import type { MediaRef } from './media.js'
-import { displayName, ensureChat, fromPerson, markJoined, replyOf, upsertMember } from './members.js'
+import { authorOf, displayName, ensureChat, markJoined, replyOf, upsertAuthor, upsertMember, type Author } from './members.js'
 import type { EvalMeta } from './pipeline.js'
 import { handleReaction, handleReactionCount } from './reactions.js'
 import { isReportCommand, startReport } from './report.js'
@@ -77,7 +77,7 @@ interface Arrival {
   probation: boolean
 }
 
-async function insertMessage(q: Q, msg: Message, runK: number): Promise<boolean> {
+async function insertMessage(q: Q, msg: Message, author: Author, runK: number): Promise<boolean> {
   const reply = replyOf(msg)
   const rows = await q.query(
     `INSERT INTO messages (chat_id, message_id, author_id, posted_at, reply_to_message_id, reply_to_author_id, has_quote, media_kind, run_k, excerpt, content_hash)
@@ -85,10 +85,10 @@ async function insertMessage(q: Q, msg: Message, runK: number): Promise<boolean>
     [
       msg.chat.id,
       msg.message_id,
-      msg.from!.id,
+      author.id,
       new Date(msg.date * 1000),
       reply?.message_id ?? null,
-      reply && fromPerson(reply as Message) ? reply.from!.id : null,
+      reply ? (authorOf(reply as Message)?.id ?? null) : null,
       Boolean(msg.quote),
       mediaOf(msg)?.kind ?? null,
       runK,
@@ -111,12 +111,12 @@ async function takeProbation(q: Q, chatId: number, userId: number): Promise<bool
   return true
 }
 
-async function registerArrival(q: Q, msg: Message): Promise<Arrival | null> {
+async function registerArrival(q: Q, msg: Message, author: Author): Promise<Arrival | null> {
   const chatId = msg.chat.id
-  const userId = msg.from!.id
+  const userId = author.id
   const chat = await q.query('SELECT last_author_id, run_length FROM chats WHERE chat_id = $1 FOR UPDATE', [chatId])
   const runK = chat[0].last_author_id === userId ? chat[0].run_length + 1 : 1
-  if (!(await insertMessage(q, msg, runK))) return null
+  if (!(await insertMessage(q, msg, author, runK))) return null
   await q.query('UPDATE chats SET last_author_id = $2, run_length = $3 WHERE chat_id = $1', [chatId, userId, runK])
   const isFirst = await claimFirst(q, chatId, userId, msg.message_id)
   return { runK, isFirst, probation: await takeProbation(q, chatId, userId) }
@@ -124,11 +124,12 @@ async function registerArrival(q: Q, msg: Message): Promise<Arrival | null> {
 
 async function registerReply(q: Q, msg: Message, now: Date): Promise<void> {
   const reply = replyOf(msg)
-  if (!reply || !fromPerson(reply as Message)) return
-  await upsertMember(q, msg.chat.id, reply.from!, now)
+  const author = reply ? authorOf(reply as Message) : null
+  if (!reply || !author) return
+  await upsertAuthor(q, msg.chat.id, author, { now, live: false })
   await q.query(
     `INSERT INTO messages (chat_id, message_id, author_id, posted_at, content_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (chat_id, message_id) DO NOTHING`,
-    [msg.chat.id, reply.message_id, reply.from!.id, new Date(reply.date * 1000), hashOf(reply as Message)],
+    [msg.chat.id, reply.message_id, author.id, new Date(reply.date * 1000), hashOf(reply as Message)],
   )
   await q.query('UPDATE messages SET reply_count = reply_count + 1 WHERE chat_id = $1 AND message_id = $2', [msg.chat.id, reply.message_id])
 }
@@ -142,6 +143,7 @@ function repliedTo(msg: Message): string | null {
 
 interface Enqueue {
   msg: Message
+  author: Author
   settings: SettingsView
   isEdit: boolean
   isFirst: boolean
@@ -150,12 +152,11 @@ interface Enqueue {
 }
 
 function metaFor(e: Enqueue, gen: number): EvalMeta {
-  const { msg } = e
-  const from = msg.from!
+  const { msg, author } = e
   const media = mediaOf(msg)
   return {
-    authorId: from.id,
-    authorName: displayName(from),
+    authorId: author.id,
+    authorName: author.name,
     postedAt: new Date(msg.date * 1000).toISOString(),
     gen,
     isEdit: e.isEdit,
@@ -163,7 +164,7 @@ function metaFor(e: Enqueue, gen: number): EvalMeta {
     mediaOnly: Boolean(media) && !textOf(msg),
     hasLinks: hasLinks(msg),
     probation: e.probation,
-    fetchBio: e.isFirst && !e.isEdit,
+    fetchBio: e.isFirst && !e.isEdit && !author.isChannel,
     mode: 'live',
   }
 }
@@ -173,14 +174,15 @@ async function enqueue(q: Q, e: Enqueue): Promise<void> {
   const media = mediaOf(msg)
   const text = textOf(msg)
   if (!text && !media) return
-  const from = msg.from!
+  const { author } = e
   const state: JevState = {
     message: text,
     replied_to: repliedTo(msg),
     previous_messages: await previousLines(q, msg.chat.id, msg.message_id, settings.num('previous_messages_count')),
-    sender_history: await senderHistory(q, { chatId: msg.chat.id, userId: from.id, messageId: msg.message_id }, new Date(msg.date * 1000)),
+    sender_history: await senderHistory(q, { chatId: msg.chat.id, userId: author.id, messageId: msg.message_id }, new Date(msg.date * 1000)),
     media_description: null,
-    sender_profile: e.isFirst ? { name: displayName(from), username: from.username ?? null, bio: null } : null,
+    // Section 3.6.4: the rule about an advertising profile does not apply to a channel, so its profile is not asked about.
+    sender_profile: e.isFirst && !author.isChannel ? { name: author.name, username: author.username, bio: null } : null,
   }
   const gen = e.isEdit ? (msg.edit_date ?? msg.date) : 0
   await enqueueEvaluation(q, { chatId: msg.chat.id, messageId: msg.message_id, gen, state, questions: settings.questions(), meta: metaFor(e, gen), media, now: e.now })
@@ -194,12 +196,12 @@ async function contentChanged(q: Q, msg: Message, stored: Buffer | null): Promis
   return stored !== null
 }
 
-async function handleEdit(ctx: Ctx, q: Q, msg: Message): Promise<void> {
+async function handleEdit(ctx: Ctx, q: Q, msg: Message, author: Author): Promise<void> {
   const now = ctx.clock.now()
   const known = await q.query('SELECT author_id, content_hash FROM messages WHERE chat_id = $1 AND message_id = $2', [msg.chat.id, msg.message_id])
-  if (known.length === 0 || known[0].author_id !== msg.from?.id) return
+  if (known.length === 0 || known[0].author_id !== author.id) return
   if (!(await contentChanged(q, msg, known[0].content_hash))) return
-  const member = await q.query('SELECT first_message_id FROM members WHERE chat_id = $1 AND user_id = $2', [msg.chat.id, msg.from!.id])
+  const member = await q.query('SELECT first_message_id FROM members WHERE chat_id = $1 AND user_id = $2', [msg.chat.id, author.id])
   const settings = await getSettings(q, msg.chat.id)
   await q.query('UPDATE messages SET excerpt = CASE WHEN deleted THEN NULL ELSE $3 END WHERE chat_id = $1 AND message_id = $2', [
     msg.chat.id,
@@ -207,24 +209,24 @@ async function handleEdit(ctx: Ctx, q: Q, msg: Message): Promise<void> {
     textOf(msg) ? makeExcerpt(textOf(msg)) : null,
   ])
   const isFirst = member[0]?.first_message_id === msg.message_id
-  await enqueue(q, { msg, settings, isEdit: true, isFirst, probation: false, now })
+  await enqueue(q, { msg, author, settings, isEdit: true, isFirst, probation: false, now })
 }
 
-async function handleNewMessage(ctx: Ctx, q: Q, msg: Message): Promise<void> {
+async function handleNewMessage(ctx: Ctx, q: Q, msg: Message, author: Author): Promise<void> {
   const now = ctx.clock.now()
-  const arrival = await registerArrival(q, msg)
+  const arrival = await registerArrival(q, msg, author)
   if (!arrival) return
   await registerReply(q, msg, now)
   const settings = await getSettings(q, msg.chat.id)
   if (isReportCommand(msg)) {
-    await startReport(ctx, q, msg, settings)
+    await startReport(ctx, q, { msg, reporterId: author.id }, settings)
     return
   }
   if (isSpamCommand(msg, ctx.env.botUsername)) {
     await startSpamCommand(ctx, q, msg)
     return
   }
-  await enqueue(q, { msg, settings, isEdit: false, isFirst: arrival.isFirst, probation: arrival.probation, now })
+  await enqueue(q, { msg, author, settings, isEdit: false, isFirst: arrival.isFirst, probation: arrival.probation, now })
 }
 
 function handlePrivate(ctx: Ctx, msg: Message, mode: { isEdit: boolean; posts: Post[] }): void {
@@ -239,11 +241,12 @@ async function handleGroupMessage(ctx: Ctx, q: Q, msg: Message, isEdit: boolean)
   await ensureChat(q, msg.chat, now)
   if (!isEdit && msg.sender_chat && msg.from && isSpamCommand(msg, ctx.env.botUsername)) return startSpamCommand(ctx, q, msg)
   for (const user of msg.new_chat_members ?? []) await markJoined(q, msg.chat.id, user, now)
-  // Spec 3.6.0: what is not written by a person is not judged and counts nowhere.
-  if (!msg.from || !fromPerson(msg)) return
-  await upsertMember(q, msg.chat.id, msg.from, now)
-  if (isEdit) await handleEdit(ctx, q, msg)
-  else await handleNewMessage(ctx, q, msg)
+  // Spec 3.6.0 and 3.6.4: what is written neither by a person nor by a channel is not judged and counts nowhere.
+  const author = authorOf(msg)
+  if (!author) return
+  await upsertAuthor(q, msg.chat.id, author, { now, live: !isEdit })
+  if (isEdit) await handleEdit(ctx, q, msg, author)
+  else await handleNewMessage(ctx, q, msg, author)
 }
 
 async function handleMessage(ctx: Ctx, q: Q, msg: Message, mode: { isEdit: boolean; posts: Post[] }): Promise<void> {

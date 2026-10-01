@@ -3,7 +3,7 @@ import type { Ctx } from './ctx.js'
 import type { Q } from './db.js'
 import { decisionLine, summarize } from './card-actions.js'
 import { createFlow, registerFlow, withReport, type Flow, type StepResult } from './flows.js'
-import { displayName, fromPerson, replyOf } from './members.js'
+import { authorOf, displayName, replyOf } from './members.js'
 import { execOp } from './ops.js'
 import { createCard, holdOwnText } from './cards.js'
 import { attachmentKind, deleteCommandMessage } from './report.js'
@@ -34,16 +34,22 @@ function notPersonReason(t: Message): string {
   return t.from?.is_bot && !t.sender_chat ? 'сообщение отправил бот' : 'сообщение отправлено не участником, а от имени канала или Telegram'
 }
 
+/** Who sent a message that no member wrote (a bot, Telegram, the group itself), for the refusal. */
+function nobody(t: Message): { userId: number; name: string } {
+  return { userId: t.from?.id ?? 0, name: t.from ? displayName(t.from) : (t.sender_chat?.title ?? 'chat') }
+}
+
+/** Section 3.6.4: a message of a channel is a member's message; the target is the channel. */
 function targetOf(msg: Message): Target | null {
-  const t = replyOf(msg)
+  const t = replyOf(msg) as Message | null
   if (!t) return null
+  const author = authorOf(t)
   return {
     messageId: t.message_id,
-    userId: t.from?.id ?? 0,
-    name: t.from ? displayName(t.from) : (t.sender_chat?.title ?? 'chat'),
+    ...(author ? { userId: author.id, name: author.name } : nobody(t)),
     sentAt: new Date(t.date * 1000).toISOString(),
-    isBot: !fromPerson(t as Message),
-    notPerson: fromPerson(t as Message) ? undefined : notPersonReason(t as Message),
+    isBot: author === null,
+    notPerson: author ? undefined : notPersonReason(t),
   }
 }
 
@@ -148,7 +154,10 @@ async function refuse(ctx: Ctx, flow: Flow, reason: string): Promise<StepResult>
   return 'stop'
 }
 
-/** An admin, the owner or a bot is never sanctioned; high karma gives no protection against an admin decision. */
+/**
+ * An admin, the owner or a bot is never sanctioned; high karma gives no protection against an admin decision. A channel has
+ * no role to check (section 3.6.4, `targetRole`).
+ */
 async function adminTarget(ctx: Ctx, flow: Flow): Promise<StepResult> {
   if (flow.data.isBot === true) return refuse(ctx, flow, flow.data.notPerson ?? 'сообщение отправил бот')
   const role = await targetRole(ctx, flow)

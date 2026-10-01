@@ -19,6 +19,8 @@ export interface LeaderRow {
   name: string
   karma: number
   is_me: boolean
+  /** Section 3.6.4: the row is a channel writing in the group. */
+  is_channel: boolean
 }
 
 function publicName(row: Row): string {
@@ -31,16 +33,16 @@ export async function leaderboard(ctx: Ctx, chatId: number, period: Period, view
   const rows =
     period === 'all'
       ? await ctx.db.query(
-          `SELECT public_id, display_name, hidden, user_id, karma AS gain FROM members WHERE chat_id = $1 AND is_bot = false AND karma <> 0 ORDER BY karma DESC, user_id LIMIT 100`,
+          `SELECT public_id, display_name, hidden, user_id, is_channel, karma AS gain FROM members WHERE chat_id = $1 AND is_bot = false AND karma <> 0 ORDER BY karma DESC, user_id LIMIT 100`,
           [chatId],
         )
       : await ctx.db.query(
-          `SELECT m.public_id, m.display_name, m.hidden, m.user_id, s.gain FROM (
+          `SELECT m.public_id, m.display_name, m.hidden, m.user_id, m.is_channel, s.gain FROM (
              SELECT user_id, sum(delta) AS gain FROM karma_events WHERE chat_id = $1 AND created_at >= $2 GROUP BY user_id HAVING sum(delta) <> 0) s
            JOIN members m ON m.chat_id = $1 AND m.user_id = s.user_id ORDER BY s.gain DESC, m.user_id LIMIT 100`,
           [chatId, since],
         )
-  const board = rows.map((r, i) => ({ place: i + 1, public_id: r.public_id as string, name: publicName(r), karma: Number(r.gain), is_me: r.user_id === viewerId }))
+  const board = rows.map((r, i) => ({ place: i + 1, public_id: r.public_id as string, name: publicName(r), karma: Number(r.gain), is_me: r.user_id === viewerId, is_channel: r.is_channel as boolean }))
   const mine = board.find((r) => r.is_me)
   return { rows: board, me: mine ? { place: mine.place, karma: mine.karma } : null }
 }
@@ -79,6 +81,7 @@ export const EMPTY_PAGE = {
   empty: true,
   name: null,
   hidden: false,
+  is_channel: false,
   karma: 0,
   place: null,
   week_delta: 0,
@@ -118,6 +121,7 @@ export async function memberPage(ctx: Ctx, chatId: number, member: Row, viewerId
     empty: false,
     name: member.user_id === viewerId ? member.display_name : publicName(member),
     hidden: member.hidden,
+    is_channel: member.is_channel,
     karma,
     place,
     week_delta: Number(week),

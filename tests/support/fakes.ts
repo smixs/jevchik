@@ -128,6 +128,12 @@ export class FakeTelegram implements TelegramApi {
   async unbanChatMember(chatId: number, userId: number) {
     this.enter('unbanChatMember', [chatId, userId])
   }
+  async banChatSenderChat(chatId: number, senderChatId: number) {
+    this.enter('banChatSenderChat', [chatId, senderChatId])
+  }
+  async unbanChatSenderChat(chatId: number, senderChatId: number) {
+    this.enter('unbanChatSenderChat', [chatId, senderChatId])
+  }
   async setMessageReaction(chatId: number, messageId: number, emoji: string) {
     this.enter('setMessageReaction', [chatId, messageId, emoji])
   }

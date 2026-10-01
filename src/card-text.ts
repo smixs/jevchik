@@ -1,5 +1,6 @@
 import { categoryTitle } from './categories.js'
 import type { Q } from './db.js'
+import { isChannelId } from './members.js'
 import type { InlineButton, TextEntity } from './ports.js'
 import { fitGraphemes, graphemeLength } from './text.js'
 
@@ -62,6 +63,15 @@ const TITLES: Record<CardKind, string> = {
   op_failed: 'Не смог выполнить действие в Telegram, подробности на экране админа',
   edit_lowered: 'Автор исправил сообщение, оно больше не похоже на спам; наказание осталось',
   punish_skipped: 'Наказание за низкую карму не применено: идёт неделя наблюдения',
+}
+
+/** Section 3.6.4: the message of a channel is deleted and the channel banned, by the bot or by /spam. */
+const CHANNEL_BANNED = 'Удалил спам и забанил канал'
+const CHANNEL_TITLED = new Set<CardKind>(['steamed', 'spam_command'])
+
+function title(card: CardRow): string {
+  const target = card.payload.targetUserId
+  return target != null && isChannelId(target) && CHANNEL_TITLED.has(card.kind) ? CHANNEL_BANNED : TITLES[card.kind]
 }
 
 export const LEFT_IN_CHAT = 'ничего, сообщение осталось в чате'
@@ -205,7 +215,7 @@ function decisions(card: CardRow): string[] {
 function topLines(card: CardRow, username: string | null, aboutMessage: boolean): string[] {
   const p = card.payload
   const category = aboutMessage ? [`Категория: ${p.category ? categoryTitle(p.category) : 'не определена'}`] : p.category ? [`Категория: ${categoryTitle(p.category)}`] : []
-  return [TITLES[card.kind], ...doneLine(card), ...member(p, username), ...category, ...confidence(p, aboutMessage)]
+  return [title(card), ...doneLine(card), ...member(p, username), ...category, ...confidence(p, aboutMessage)]
 }
 
 interface QuoteBlock {

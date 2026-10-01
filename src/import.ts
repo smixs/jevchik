@@ -9,7 +9,7 @@ import { boostFor, award } from './karma.js'
 import { historyText } from './jev/history.js'
 import { fitRequest, selectQuestions, type JevState } from './jev/state.js'
 import type { Answers } from './jev/facts.js'
-import { upsertMember } from './members.js'
+import { upsertAuthor } from './members.js'
 import { applyEvaluation, type EvalMeta } from './pipeline.js'
 import { JevError } from './ports.js'
 import { classify } from './reactions.js'
@@ -31,6 +31,8 @@ export interface ImportMessage {
   reactions: Array<{ key: string; count: number }>
   /** A photo, file, sticker or other attachment: the export has no file_unique_id, so no content hash is stored. */
   media: boolean
+  /** Written by a channel in the group (section 3.6.4). */
+  isChannel: boolean
 }
 
 export type ImportError = 'too_large' | 'not_json' | 'wrong_chat' | 'empty' | 'busy'
@@ -65,10 +67,19 @@ function hasMedia(raw: Row): boolean {
   return ['photo', 'file', 'media_type'].some((key) => raw[key] !== undefined)
 }
 
+/** `user<id>` is the person <id>; section 3.6.4: `channel<id>` is the channel -100<id>. Anything else is nobody's. */
+function authorOfExport(fromId: unknown): { authorId: number; isChannel: boolean } | null {
+  if (typeof fromId !== 'string') return null
+  if (fromId.startsWith('user')) return { authorId: Number(fromId.slice(4)), isChannel: false }
+  if (fromId.startsWith('channel') && /^\d+$/.test(fromId.slice(7))) return { authorId: Number(`-100${fromId.slice(7)}`), isChannel: true }
+  return null
+}
+
 function toMessage(raw: Row): ImportMessage | null {
-  if (raw.type !== 'message' || typeof raw.from_id !== 'string' || !raw.from_id.startsWith('user')) return null
+  const from = raw.type === 'message' ? authorOfExport(raw.from_id) : null
+  if (!from) return null
   const seconds = Number(raw.date_unixtime)
-  const authorId = Number(raw.from_id.slice(4))
+  const { authorId, isChannel } = from
   if (!Number.isFinite(seconds) || !Number.isFinite(authorId)) return null
   return {
     id: Number(raw.id),
@@ -79,6 +90,7 @@ function toMessage(raw: Row): ImportMessage | null {
     replyTo: raw.reply_to_message_id ? Number(raw.reply_to_message_id) : null,
     reactions: reactionsOf(raw.reactions),
     media: hasMedia(raw),
+    isChannel,
   }
 }
 
@@ -241,7 +253,7 @@ function importHash(m: ImportMessage): Buffer | null {
 async function storeMessage(q: Q, env: Env, m: ImportMessage, runK: number): Promise<boolean> {
   const { ctx, settings, chatId } = env
   const now = ctx.clock.now()
-  await upsertMember(q, chatId, { id: m.authorId, first_name: m.author }, now)
+  await upsertAuthor(q, chatId, { id: m.authorId, name: m.author, username: null, isChannel: m.isChannel }, { now, live: false })
   const fresh = now.getTime() - m.postedAt.getTime() < settings.num('excerpt_days') * DAY_MS
   const parentRow = m.replyTo !== null ? await q.query('SELECT author_id FROM messages WHERE chat_id = $1 AND message_id = $2', [chatId, m.replyTo]) : []
   const inserted = await q.query(
@@ -249,6 +261,8 @@ async function storeMessage(q: Q, env: Env, m: ImportMessage, runK: number): Pro
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (chat_id, message_id) DO NOTHING RETURNING message_id`,
     [chatId, m.id, m.authorId, m.postedAt, parentRow[0] ? m.replyTo : null, parentRow[0]?.author_id ?? null, runK, fresh && m.text ? makeExcerpt(m.text) : null, importHash(m)],
   )
+  // Section 3.6.4: a channel with imported messages is no newcomer, even one first seen live.
+  if (inserted.length > 0 && m.isChannel) await q.query('UPDATE members SET joined_seen_at = NULL WHERE chat_id = $1 AND user_id = $2', [chatId, m.authorId])
   return inserted.length > 0
 }
 

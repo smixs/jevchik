@@ -93,6 +93,14 @@ export class GrammyTelegram implements TelegramApi {
     return call(async () => void (await this.api.unbanChatMember(chatId, userId, { only_if_banned: true })))
   }
 
+  banChatSenderChat(chatId: number, senderChatId: number): Promise<void> {
+    return call(async () => void (await this.api.banChatSenderChat(chatId, senderChatId)))
+  }
+
+  unbanChatSenderChat(chatId: number, senderChatId: number): Promise<void> {
+    return call(async () => void (await this.api.unbanChatSenderChat(chatId, senderChatId)))
+  }
+
   setMessageReaction(chatId: number, messageId: number, emoji: string): Promise<void> {
     return call(async () => void (await this.api.setMessageReaction(chatId, messageId, [{ type: 'emoji', emoji: emoji as never }])))
   }

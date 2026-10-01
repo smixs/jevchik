@@ -88,6 +88,9 @@ export interface TelegramApi {
   restrictChatMember(chatId: number, userId: number, permissions: ChatPermissions, untilDate?: number): Promise<void>
   banChatMember(chatId: number, userId: number): Promise<void>
   unbanChatMember(chatId: number, userId: number): Promise<void>
+  /** Section 3.6.4: a channel that writes in the group is banned there as a sender chat. */
+  banChatSenderChat(chatId: number, senderChatId: number): Promise<void>
+  unbanChatSenderChat(chatId: number, senderChatId: number): Promise<void>
   setMessageReaction(chatId: number, messageId: number, emoji: string): Promise<void>
   setChatMemberTag(chatId: number, userId: number, tag: string): Promise<void>
   getChatMember(chatId: number, userId: number): Promise<ChatMemberInfo>
