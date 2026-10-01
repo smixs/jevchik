@@ -16,6 +16,8 @@ export interface Page {
   click: (selector: string) => Promise<void>
   /** What the page asked Telegram to vibrate, in order. */
   haptics: string[]
+  /** The links the page asked Telegram to open, in order. */
+  opened: string[]
 }
 
 /** Rewrites a JSON answer of the API before the page sees it: for fields the server of this branch does not give yet. */
@@ -39,7 +41,8 @@ export async function openPage(site: Site, initData: string, options: { patch?: 
     notificationOccurred: (type: string) => haptics.push(`notification:${type}`),
     selectionChanged: () => haptics.push('selection'),
   }
-  const telegram = { WebApp: { initData, ready: () => {}, expand: () => {}, HapticFeedback } }
+  const opened: string[] = []
+  const telegram = { WebApp: { initData, ready: () => {}, expand: () => {}, HapticFeedback, openTelegramLink: (url: string) => opened.push(url) } }
   ;(window as unknown as { Telegram: unknown }).Telegram = telegram
   if (patch) {
     const real = window.fetch.bind(window)
@@ -66,6 +69,6 @@ export async function openPage(site: Site, initData: string, options: { patch?: 
     const element = await waitFor(selector)
     element.dispatchEvent(new window.Event('click', { bubbles: true }))
   }
-  return { window, $, $$, text: () => window.document.getElementById('app')!.textContent ?? '', waitFor, click, haptics }
+  return { window, $, $$, text: () => window.document.getElementById('app')!.textContent ?? '', waitFor, click, haptics, opened }
 }
 

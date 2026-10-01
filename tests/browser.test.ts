@@ -67,6 +67,16 @@ describe('F16: Mini App in a browser environment, two chats with different fixtu
     expect(page.$('svg.chart')).not.toBeNull()
   })
 
+  it('«Открыть в чате» asks Telegram to open the message: a plain link does nothing inside the Mini App', async () => {
+    const page = await open(VECTORS.alice_me)
+    await page.waitFor('[data-field=messages_latest] a')
+    const link = page.$('[data-field=messages_latest] a')!
+    const event = new page.window.Event('click', { bubbles: true, cancelable: true })
+    link.dispatchEvent(event)
+    expect(page.opened).toEqual(['https://t.me/c/1234567890/503'])
+    expect(event.defaultPrevented).toBe(true)
+  })
+
   it('the second chat shows only its own data', async () => {
     const page = await open(VECTORS.alice_me_other)
     await page.waitFor('[data-field=karma]')

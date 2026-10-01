@@ -8,6 +8,7 @@ interface TelegramWebApp {
   expand?: () => void
   setHeaderColor?: (color: string) => void
   setBackgroundColor?: (color: string) => void
+  openTelegramLink?: (url: string) => void
 }
 
 declare global {
@@ -787,7 +788,21 @@ function paintTelegram(): void {
   }
 }
 
+/**
+ * A link to a message of the chat: inside Telegram a plain link does nothing (the web view does not leave the Mini App), so
+ * Telegram is asked to open it. Outside Telegram, or in an old one without the method, the link works as a link.
+ */
+function openChatLinks(): void {
+  document.addEventListener('click', (event) => {
+    const link = (event.target as Element | null)?.closest?.('a[href^="https://t.me/"]')
+    if (!link || !webApp?.openTelegramLink) return
+    event.preventDefault()
+    webApp.openTelegramLink(link.getAttribute('href') as string)
+  })
+}
+
 function boot(): void {
+  openChatLinks()
   juice.install()
   webApp?.ready?.()
   webApp?.expand?.()
