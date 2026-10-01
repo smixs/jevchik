@@ -390,6 +390,20 @@ describe('F31: import of a channel (sections 3.6.4 and 3.11)', () => {
 })
 
 describe('F31: the Mini App API marks a channel (section 3.6.4)', () => {
+  it('a bot is in no leaderboard: all time, month or week', async () => {
+    await h.close()
+    h = await createHarness()
+    await seedWorld(h)
+    const web = await makeWeb(h)
+    await h.db.query(`INSERT INTO members (chat_id, user_id, display_name, karma, is_bot, created_at) VALUES ($1,777,'Helper Bot',900,true,$2)`, [CHAT, h.clock.now()])
+    await h.db.query(`INSERT INTO members (chat_id, user_id, display_name, karma, created_at) VALUES ($1,778,'Dan',40,$2)`, [CHAT, h.clock.now()])
+    await h.db.query(`INSERT INTO karma_events (chat_id, user_id, delta, reason, source, idempotency_key, created_at) VALUES ($1,777,900,'import','import','bot-777',$2),($1,778,40,'import','import','dan-778',$2)`, [CHAT, h.clock.now()])
+    for (const period of ['all', 'month', 'week']) {
+      const names = (await (await get(web, `/api/leaderboard?period=${period}`, VECTORS.bob_lb)).json()).rows.map((r: { name: string }) => r.name)
+      expect([period, names.includes('Helper Bot'), names.includes('Dan')]).toEqual([period, false, true])
+    }
+  })
+
   it('is_channel in every leaderboard row and on the member page', async () => {
     await h.close()
     h = await createHarness()

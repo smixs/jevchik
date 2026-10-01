@@ -39,7 +39,7 @@ export async function leaderboard(ctx: Ctx, chatId: number, period: Period, view
       : await ctx.db.query(
           `SELECT m.public_id, m.display_name, m.hidden, m.user_id, m.is_channel, s.gain FROM (
              SELECT user_id, sum(delta) AS gain FROM karma_events WHERE chat_id = $1 AND created_at >= $2 GROUP BY user_id HAVING sum(delta) <> 0) s
-           JOIN members m ON m.chat_id = $1 AND m.user_id = s.user_id ORDER BY s.gain DESC, m.user_id LIMIT 100`,
+           JOIN members m ON m.chat_id = $1 AND m.user_id = s.user_id AND m.is_bot = false ORDER BY s.gain DESC, m.user_id LIMIT 100`,
           [chatId, since],
         )
   const board = rows.map((r, i) => ({ place: i + 1, public_id: r.public_id as string, name: publicName(r), karma: Number(r.gain), is_me: r.user_id === viewerId, is_channel: r.is_channel as boolean }))

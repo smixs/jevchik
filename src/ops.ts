@@ -289,6 +289,12 @@ async function tagMember(ctx: Ctx, op: Row): Promise<Row | null> {
   return rows[0] ?? null
 }
 
+/** An imported history does not say who is a bot; Telegram does, and a bot leaves the rating and gets no tag. */
+async function markBot(ctx: Ctx, chatId: number, userId: number): Promise<Record<string, unknown>> {
+  await ctx.db.query('UPDATE members SET is_bot = true WHERE chat_id = $1 AND user_id = $2', [chatId, userId])
+  return { skipped: true, bot: true }
+}
+
 /** The tag takes the karma at the moment of sending; a text equal to the one set last is not sent again. */
 async function performTag(ctx: Ctx, op: Row): Promise<Record<string, unknown>> {
   const { userId, template } = op.payload as { userId: number; template: string }
@@ -297,6 +303,7 @@ async function performTag(ctx: Ctx, op: Row): Promise<Record<string, unknown>> {
   const tag = karmaTag(template, row.karma)
   if (tag === row.tag_text) return { skipped: true }
   const member = await ctx.tg.getChatMember(op.chat_id, userId)
+  if (member.is_bot) return markBot(ctx, op.chat_id, userId)
   const present = tagIsPresent(member, { tag, last: row.tag_text, template })
   if (!present) await ctx.tg.setChatMemberTag(op.chat_id, userId, tag)
   await ctx.db.query('UPDATE members SET tag_text = $3, tag_set_at = $4 WHERE chat_id = $1 AND user_id = $2', [op.chat_id, userId, tag, ctx.clock.now()])

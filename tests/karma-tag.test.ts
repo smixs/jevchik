@@ -136,6 +136,17 @@ describe('F26: the member tag shows karma as a signed number', () => {
     expect(tags()).toEqual([])
   })
 
+  it('a member Telegram reports as a bot gets no tag and is marked a bot', async () => {
+    h.tg.bots.add(ALICE.id)
+    await react(BOB)
+    await later(30 * MIN)
+    expect(tags()).toEqual([])
+    expect((await h.db.query('SELECT is_bot FROM members WHERE chat_id = $1 AND user_id = $2', [CHAT, ALICE.id]))[0].is_bot).toBe(true)
+    await react(CAROL)
+    await later(30 * MIN)
+    expect(h.tg.of('getChatMember').filter((c) => c.args[1] === ALICE.id)).toHaveLength(1)
+  })
+
   it('the template of the setting wraps the number', async () => {
     await set('karma_tag_template', 'карма {n}')
     await react(BOB)

@@ -66,6 +66,8 @@ export class FakeTelegram implements TelegramApi {
   members = new Map<number, ChatMemberInfo['status']>()
   /** The status in one chat, by `chatId:userId`; wins over `members`. */
   statusIn = new Map<string, ChatMemberInfo['status']>()
+  /** Users Telegram reports as bots. */
+  bots = new Set<number>()
   /** Member tags as Telegram holds them. */
   tags = new Map<number, string>()
   admins: Array<{ user_id: number; is_bot: boolean }> = []
@@ -144,7 +146,7 @@ export class FakeTelegram implements TelegramApi {
   async getChatMember(chatId: number, userId: number): Promise<ChatMemberInfo> {
     this.enter('getChatMember', [chatId, userId])
     const tag = this.tags.get(userId)
-    return { status: this.statusIn.get(`${chatId}:${userId}`) ?? this.members.get(userId) ?? 'member', ...(tag !== undefined ? { tag } : {}) }
+    return { status: this.statusIn.get(`${chatId}:${userId}`) ?? this.members.get(userId) ?? 'member', ...(this.bots.has(userId) ? { is_bot: true } : {}), ...(tag !== undefined ? { tag } : {}) }
   }
   async getChatAdministrators(chatId: number) {
     this.enter('getChatAdministrators', [chatId])
