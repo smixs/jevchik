@@ -78,6 +78,13 @@ export async function upsertMember(q: Q, chatId: number, user: TgUser, now: Date
   )
 }
 
+/** Section 3.6.0: the bot saw this person join the chat; only such a member can be a newcomer. The first sighting stays. */
+export async function markJoined(q: Q, chatId: number, user: TgUser, at: Date): Promise<void> {
+  if (user.is_bot) return
+  await upsertMember(q, chatId, user, at)
+  await q.query('UPDATE members SET joined_seen_at = COALESCE(joined_seen_at, $3) WHERE chat_id = $1 AND user_id = $2', [chatId, user.id, at])
+}
+
 export async function observationEnd(q: Q, chatId: number, settings: SettingsView): Promise<Date | null> {
   const rows = await q.query<{ observation_started_at: Date }>('SELECT observation_started_at FROM chats WHERE chat_id = $1', [chatId])
   if (rows.length === 0) return null

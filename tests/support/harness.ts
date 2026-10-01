@@ -28,6 +28,8 @@ export interface Harness {
   clock: FakeClock
   importDir: string
   send(update: Update): Promise<void>
+  /** Users who were in the chat before the bot came: the harness sends no join for them (section 3.6.0). */
+  oldTimers: Set<number>
   close(): Promise<void>
 }
 
@@ -79,6 +81,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     env: { botUsername: 'jevchik_bot', botId: 777, importDir, jevModel: 'jev-1.13.0' },
   }
   const app = createApp(ctx)
+  const seenAuthors = new Set<string>()
+  const oldTimers = new Set<number>()
   return {
     app,
     ctx,
@@ -88,10 +92,42 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     vision,
     clock,
     importDir,
-    send: (update) => app.handle(update),
+    send: async (update) => {
+      const join = joinBefore(update, seenAuthors, oldTimers)
+      if (join) await app.handle(join)
+      await app.handle(update)
+    },
+    oldTimers,
     close: drop,
   }
 }
+
+/**
+ * Section 3.6.0: a newcomer is somebody the bot saw joining. The authors of the tests are such people by default: before the
+ * first message of an author the harness sends the membership update of their join. `oldTimers` opts a user out.
+ */
+function joinBefore(update: Update, seen: Set<string>, oldTimers: Set<number>): Update | null {
+  const change = update.chat_member
+  if (change) seen.add(`${change.chat.id}:${change.new_chat_member.user.id}`)
+  const msg = update.message
+  if (!msg?.from || msg.from.is_bot || msg.chat.type === 'private' || msg.sender_chat) return null
+  const key = `${msg.chat.id}:${msg.from.id}`
+  if (seen.has(key)) return null
+  seen.add(key)
+  if (oldTimers.has(msg.from.id)) return null
+  return {
+    update_id: joinUpdateId++,
+    chat_member: {
+      chat: msg.chat,
+      from: msg.from,
+      date: msg.date,
+      old_chat_member: { status: 'left', user: msg.from },
+      new_chat_member: { status: 'member', user: msg.from },
+    },
+  } as unknown as Update
+}
+
+let joinUpdateId = 900_000_000
 
 let updateId = 1000
 let nextMessage = 100

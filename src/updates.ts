@@ -6,7 +6,7 @@ import { enqueueEvaluation } from './evaluation.js'
 import { senderHistory } from './jev/history.js'
 import type { JevState } from './jev/state.js'
 import type { MediaRef } from './media.js'
-import { displayName, ensureChat, fromPerson, replyOf, upsertMember } from './members.js'
+import { displayName, ensureChat, fromPerson, markJoined, replyOf, upsertMember } from './members.js'
 import type { EvalMeta } from './pipeline.js'
 import { handleReaction, handleReactionCount } from './reactions.js'
 import { isReportCommand, startReport } from './report.js'
@@ -238,6 +238,7 @@ async function handleGroupMessage(ctx: Ctx, q: Q, msg: Message, isEdit: boolean)
   const now = ctx.clock.now()
   await ensureChat(q, msg.chat, now)
   if (!isEdit && msg.sender_chat && msg.from && isSpamCommand(msg, ctx.env.botUsername)) return startSpamCommand(ctx, q, msg)
+  for (const user of msg.new_chat_members ?? []) await markJoined(q, msg.chat.id, user, now)
   // Spec 3.6.0: what is not written by a person is not judged and counts nowhere.
   if (!msg.from || !fromPerson(msg)) return
   await upsertMember(q, msg.chat.id, msg.from, now)
@@ -249,6 +250,9 @@ async function handleMessage(ctx: Ctx, q: Q, msg: Message, mode: { isEdit: boole
   if (msg.chat.type === 'private') return handlePrivate(ctx, msg, mode)
   if (GROUP_TYPES.has(msg.chat.type)) await handleGroupMessage(ctx, q, msg, mode.isEdit)
 }
+
+const OUTSIDE = new Set(['left', 'kicked'])
+const INSIDE = new Set(['member', 'restricted'])
 
 async function handleMembership(ctx: Ctx, q: Q, update: Update): Promise<void> {
   const now = ctx.clock.now()
@@ -263,8 +267,9 @@ async function handleMembership(ctx: Ctx, q: Q, update: Update): Promise<void> {
   const user = change.new_chat_member.user
   if (user.is_bot) return
   await upsertMember(q, change.chat.id, user, now)
+  if (OUTSIDE.has(change.old_chat_member.status) && INSIDE.has(change.new_chat_member.status)) await markJoined(q, change.chat.id, user, now)
   // A new role lifts the "not subject to a tag" mark set for an administrator (section 3.12); a tag a person set stays theirs.
-  const liftAdmin = `CASE WHEN tag_exempt = 'target_admin' AND status IS DISTINCT FROM $3 THEN NULL ELSE tag_exempt END`
+  const liftAdmin = `CASE WHEN tag_exempt = 'target_admin' AND $3 NOT IN ('administrator', 'creator') THEN NULL ELSE tag_exempt END`
   await q.query(`UPDATE members SET status = $3, tag_exempt = ${liftAdmin} WHERE chat_id = $1 AND user_id = $2`, [
     change.chat.id,
     user.id,

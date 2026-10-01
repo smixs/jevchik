@@ -30,12 +30,15 @@ export function historyText(n: number, first: Date | null, postedAt: Date): stri
 }
 
 /**
- * Section 3.6.0: a newcomer has at most `limit` messages in this chat, imported ones included; 0 makes everybody
+ * Section 3.6.0: a newcomer joined the chat after the bot and has at most `limit` messages in it, imported ones included; 0 makes everybody
  * one. For a new message the messages sent not later than it count (a delayed evaluation or messages that came right after
  * it change nothing); for an edit (`upTo` null) all the member's messages at the moment of the edit count.
  */
 export async function isNewcomer(q: Q, member: { chatId: number; userId: number; upTo: number | null }, limit: number): Promise<boolean> {
   if (limit === 0) return true
+  // Whoever was in the chat before the bot came is not a newcomer, however few of their messages the bot knows.
+  const seen = await q.query('SELECT 1 FROM members WHERE chat_id = $1 AND user_id = $2 AND joined_seen_at IS NOT NULL', [member.chatId, member.userId])
+  if (seen.length === 0) return false
   const rows = await q.query<{ n: number }>(
     'SELECT count(*)::int AS n FROM messages WHERE chat_id = $1 AND author_id = $2 AND ($3::bigint IS NULL OR message_id <= $3)',
     [member.chatId, member.userId, member.upTo],
