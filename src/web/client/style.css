@@ -202,3 +202,18 @@ img.ban{flex:none;width:80px;height:80px;border-radius:var(--r-m);background:var
 .jconfetti{position:fixed;inset:0;z-index:9;pointer-events:none;overflow:hidden}
 .jconfetti i{position:absolute;display:block}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+
+/* moderation by an admin (section 3.6.5) */
+.chan.bot{padding:1px var(--s2);background:var(--surface-2);border-color:var(--line);color:var(--muted)}
+button.danger{min-height:var(--tap);display:inline-flex;align-items:center;justify-content:center;padding:0 var(--s5);border-radius:var(--r-m);font-weight:700;font-size:var(--fs-m);border:1px solid #5c2029;background:var(--danger-tint);color:var(--danger)}
+.mod{display:flex;flex-direction:column;gap:var(--s3)}
+.mod [hidden]{display:none}
+.mod[aria-busy=true]{opacity:.6;pointer-events:none}
+.ban-card .mod{margin-top:var(--s2);padding-top:var(--s2);border-top:1px solid var(--line-soft)}
+.check{display:flex;align-items:center;gap:var(--s3);min-height:var(--tap);font-weight:700;font-size:var(--fs-m);cursor:pointer}
+.check input{width:24px;height:24px;flex:none;accent-color:var(--accent)}
+[data-field=member_results]{display:flex;flex-direction:column;gap:var(--s2)}
+[data-field=member_results]:empty{display:none}
+[data-field=member_results] .who{flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+[data-field=member_results] .hint{white-space:normal;text-align:left}
+.ban-card h2{overflow-wrap:anywhere}

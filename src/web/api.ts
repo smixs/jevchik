@@ -2,8 +2,10 @@ import { Hono, type Context } from 'hono'
 import { appealState, submitAppeal } from '../appeal.js'
 import { renderCard, type CardRow } from '../card-text.js'
 import type { Ctx } from '../ctx.js'
+import type { Row } from '../db.js'
 import { startImport } from '../import.js'
 import { observationEnd } from '../members.js'
+import { modLog, moderate, requestUnban, sanctionOf, type ModAction } from '../moderation.js'
 import { changeSetting, getSettings, getSettingsWithVersions, listAudit, SCHEMA, SettingsError } from '../settings/settings.js'
 import { parseContext, verifyInitData, type Screen } from './auth.js'
 import { banList, EMPTY_PAGE, leaderboard, memberPage, parsePeriod } from './queries.js'
@@ -229,6 +231,12 @@ function mountPublic(app: Api, ctx: Ctx): void {
     const result = await submitAppeal(ctx, auth.chatId, auth.userId, text)
     return c.json(result, result.status === 'invalid' ? 422 : 200)
   })
+
+  /** Section 3.6.5: a member under a sanction of an administrator asks the administrators to lift it, once. */
+  app.post('/api/appeal/request', async (c) => {
+    const auth = c.get('auth')
+    return c.json(await requestUnban(ctx, auth.chatId, auth.userId))
+  })
 }
 
 /**
@@ -245,6 +253,72 @@ async function adminCards(ctx: Ctx, chatId: number): Promise<unknown[]> {
   const cards = []
   for (const row of rows) cards.push({ ...row, ...(await renderCard(ctx.db, { ...row, chat_id: chatId }, now)) })
   return cards
+}
+
+const PUBLIC_ID = /^[0-9a-f-]{36}$/
+const SEARCH_LIMIT = 20
+
+/** The member as an administrator sees them: the real name and the sanction, also when the page is hidden. */
+async function modView(ctx: Ctx, chatId: number, member: Row): Promise<Record<string, unknown>> {
+  return {
+    public_id: member.public_id,
+    name: member.display_name,
+    username: member.username ?? null,
+    karma: Number(member.karma),
+    is_channel: member.is_channel,
+    is_bot: member.is_bot,
+    sanction: await sanctionOf(ctx.db, chatId, member.user_id),
+  }
+}
+
+async function memberByPublicId(ctx: Ctx, chatId: number, id: string): Promise<Row | null> {
+  if (!PUBLIC_ID.test(id)) return null
+  return (await ctx.db.query('SELECT * FROM members WHERE chat_id = $1 AND public_id = $2', [chatId, id]))[0] ?? null
+}
+
+/** Section 3.6.5: the members by a part of the name or of the username, the bans with real names, the actions and their journal. */
+function mountModeration(app: Api, ctx: Ctx): void {
+  app.get('/api/admin/members', async (c) => {
+    const text = (c.req.query('q') ?? '').trim().replace(/^@/, '')
+    if (text.length < 2) return c.json({ members: [] })
+    const like = `%${text.replace(/[\\%_]/g, '\\$&')}%`
+    const rows = await ctx.db.query('SELECT * FROM members WHERE chat_id = $1 AND (display_name ILIKE $2 OR username ILIKE $2) ORDER BY karma DESC, user_id LIMIT $3', [c.get('auth').chatId, like, SEARCH_LIMIT])
+    const members = []
+    for (const row of rows) members.push(await modView(ctx, c.get('auth').chatId, row))
+    return c.json({ members })
+  })
+
+  app.get('/api/admin/members/:publicId', async (c) => {
+    const member = await memberByPublicId(ctx, c.get('auth').chatId, c.req.param('publicId'))
+    return member ? c.json(await modView(ctx, c.get('auth').chatId, member)) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.post('/api/admin/members/:publicId/:action', async (c) => {
+    const auth = c.get('auth')
+    const action = c.req.param('action')
+    if (action !== 'steam' && action !== 'ban' && action !== 'unban') return c.json({ error: 'not_found' }, 404)
+    const member = await memberByPublicId(ctx, auth.chatId, c.req.param('publicId'))
+    if (!member) return c.json({ error: 'not_found' }, 404)
+    const body = (await c.req.json().catch(() => null)) as { hours?: unknown } | null
+    const result = await moderate(ctx, {
+      chatId: auth.chatId,
+      admin: { id: auth.userId, name: auth.name },
+      target: { userId: member.user_id, name: member.display_name, isChannel: member.is_channel },
+      action: action as ModAction,
+      hours: typeof body?.hours === 'number' ? body.hours : undefined,
+    })
+    return c.json({ ...result, member: await modView(ctx, auth.chatId, member) })
+  })
+
+  app.get('/api/admin/bans', async (c) => {
+    const chatId = c.get('auth').chatId
+    const rows = await ctx.db.query('SELECT b.ban_id, m.* FROM bans b JOIN members m ON m.chat_id = b.chat_id AND m.user_id = b.user_id WHERE b.chat_id = $1 ORDER BY b.created_at DESC LIMIT 100', [chatId])
+    const bans = []
+    for (const row of rows) bans.push({ ban_id: row.ban_id, ...(await modView(ctx, chatId, row)) })
+    return c.json({ bans })
+  })
+
+  app.get('/api/admin/modlog', async (c) => c.json({ log: await modLog(ctx, c.get('auth').chatId) }))
 }
 
 function mountAdmin(app: Api, ctx: Ctx): void {
@@ -349,6 +423,7 @@ export function createWebApp(ctx: Ctx, options: WebOptions): Hono<Env> {
   mountBase(app, ctx, options)
   mountPublic(app, ctx)
   mountAdmin(app, ctx)
+  mountModeration(app, ctx)
   mountStatic(app, options)
   return app
 }

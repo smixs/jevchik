@@ -61,11 +61,18 @@ async function returnReport(ctx: Ctx, q: Q, card: CardRow): Promise<string> {
   return publish ? 'жалоба отклонена, сообщение возвращается в чат' : 'жалоба отклонена'
 }
 
+/** «Оставить» on a request to lift a sanction (section 3.6.5): the member sees the refusal in the Mini App. */
+async function keepSanction(q: Q, card: CardRow): Promise<string> {
+  await q.query(`UPDATE bans SET appeal_status = 'rejected' WHERE chat_id = $1 AND user_id = $2`, [card.chat_id, card.payload.targetUserId])
+  return 'наказание оставлено в силе'
+}
+
 /** The buttons that only change the database: the report ones and «Не спам» on a message still in the chat. */
 function noteAction(ctx: Ctx): (q: Q, card: CardRow, action: CardAction) => Promise<string> {
   return async (q, card, action) => {
     if (action === 'confirm') return confirmReport(ctx, q, card)
     if (action === 'return') return returnReport(ctx, q, card)
+    if (action === 'keep') return keepSanction(q, card)
     return 'не спам, сообщение осталось в чате'
   }
 }

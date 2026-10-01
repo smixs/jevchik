@@ -21,28 +21,34 @@ export interface LeaderRow {
   is_me: boolean
   /** Section 3.6.4: the row is a channel writing in the group. */
   is_channel: boolean
+  /** Section 3.9: the row is a bot, shown only with `bots_in_rating` on. */
+  is_bot: boolean
 }
 
 function publicName(row: Row): string {
   return row.hidden ? maskName(row.display_name) : row.display_name
 }
 
+/** Section 3.9: who stands in the leaderboard: a bot only with `bots_in_rating` on, a banned member never. */
+const RANKED = `(m.is_bot = false OR $2) AND NOT EXISTS (SELECT 1 FROM bans b WHERE b.chat_id = m.chat_id AND b.user_id = m.user_id AND b.state = 'banned')`
+
 export async function leaderboard(ctx: Ctx, chatId: number, period: Period, viewerId: number): Promise<{ rows: LeaderRow[]; me: { place: number; karma: number } | null }> {
   const days = period === 'week' ? 7 : 30
   const since = new Date(ctx.clock.now().getTime() - days * DAY_MS)
+  const bots = (await getSettings(ctx.db, chatId)).bool('bots_in_rating')
   const rows =
     period === 'all'
       ? await ctx.db.query(
-          `SELECT public_id, display_name, hidden, user_id, is_channel, karma AS gain FROM members WHERE chat_id = $1 AND is_bot = false AND karma <> 0 ORDER BY karma DESC, user_id LIMIT 100`,
-          [chatId],
+          `SELECT m.public_id, m.display_name, m.hidden, m.user_id, m.is_channel, m.is_bot, m.karma AS gain FROM members m WHERE m.chat_id = $1 AND ${RANKED} AND m.karma <> 0 ORDER BY m.karma DESC, m.user_id LIMIT 100`,
+          [chatId, bots],
         )
       : await ctx.db.query(
-          `SELECT m.public_id, m.display_name, m.hidden, m.user_id, m.is_channel, s.gain FROM (
-             SELECT user_id, sum(delta) AS gain FROM karma_events WHERE chat_id = $1 AND created_at >= $2 GROUP BY user_id HAVING sum(delta) <> 0) s
-           JOIN members m ON m.chat_id = $1 AND m.user_id = s.user_id AND m.is_bot = false ORDER BY s.gain DESC, m.user_id LIMIT 100`,
-          [chatId, since],
+          `SELECT m.public_id, m.display_name, m.hidden, m.user_id, m.is_channel, m.is_bot, s.gain FROM (
+             SELECT user_id, sum(delta) AS gain FROM karma_events WHERE chat_id = $1 AND created_at >= $3 GROUP BY user_id HAVING sum(delta) <> 0) s
+           JOIN members m ON m.chat_id = $1 AND m.user_id = s.user_id AND ${RANKED} ORDER BY s.gain DESC, m.user_id LIMIT 100`,
+          [chatId, bots, since],
         )
-  const board = rows.map((r, i) => ({ place: i + 1, public_id: r.public_id as string, name: publicName(r), karma: Number(r.gain), is_me: r.user_id === viewerId, is_channel: r.is_channel as boolean }))
+  const board = rows.map((r, i) => ({ place: i + 1, public_id: r.public_id as string, name: publicName(r), karma: Number(r.gain), is_me: r.user_id === viewerId, is_channel: r.is_channel as boolean, is_bot: r.is_bot as boolean }))
   const mine = board.find((r) => r.is_me)
   return { rows: board, me: mine ? { place: mine.place, karma: mine.karma } : null }
 }
@@ -82,6 +88,7 @@ export const EMPTY_PAGE = {
   name: null,
   hidden: false,
   is_channel: false,
+  is_bot: false,
   karma: 0,
   place: null,
   week_delta: 0,
@@ -111,7 +118,9 @@ export async function memberPage(ctx: Ctx, chatId: number, member: Row, viewerId
   const settings = await getSettings(q, chatId)
   const userId = member.user_id as number
   const karma = Number(member.karma)
-  const place = (await q.query('SELECT count(*)::int AS n FROM members WHERE chat_id = $1 AND is_bot = false AND karma > $2', [chatId, karma]))[0].n + 1
+  const bots = settings.bool('bots_in_rating')
+  const ranked = (await q.query(`SELECT 1 FROM members m WHERE m.chat_id = $1 AND m.user_id = $3 AND ${RANKED}`, [chatId, bots, userId])).length > 0
+  const place = ranked ? (await q.query(`SELECT count(*)::int AS n FROM members m WHERE m.chat_id = $1 AND ${RANKED} AND m.karma > $3`, [chatId, bots, karma]))[0].n + 1 : null
   const week = (await q.query('SELECT COALESCE(sum(delta), 0) AS s FROM karma_events WHERE chat_id = $1 AND user_id = $2 AND created_at >= $3', [chatId, userId, new Date(now.getTime() - 7 * DAY_MS)]))[0].s
   const c = await counters(q, chatId, userId)
   const streak = await streakWeeks(q, { chatId, userId }, now, settings.str('timezone'))
@@ -122,6 +131,7 @@ export async function memberPage(ctx: Ctx, chatId: number, member: Row, viewerId
     name: member.user_id === viewerId ? member.display_name : publicName(member),
     hidden: member.hidden,
     is_channel: member.is_channel,
+    is_bot: member.is_bot,
     karma,
     place,
     week_delta: Number(week),
@@ -139,10 +149,16 @@ export async function memberPage(ctx: Ctx, chatId: number, member: Row, viewerId
   }
 }
 
+/** A record made by an administrator explains itself; the jokes about spam are for the records the bot made. */
+function banExplanation(r: Row, jokes: ReturnType<typeof loadJokes>): string {
+  if (r.source === 'admin') return r.state === 'banned' ? 'Забанен по решению админа.' : 'В парилке по решению админа.'
+  return jokes.explanations[r.explanation_idx % jokes.explanations.length]
+}
+
 export async function banList(ctx: Ctx, chatId: number): Promise<unknown[]> {
   const jokes = loadJokes()
   const rows = await ctx.db.query(
-    `SELECT b.ban_id, b.category, b.explanation_idx, b.image_idx, b.state, b.created_at, m.display_name
+    `SELECT b.ban_id, b.category, b.explanation_idx, b.image_idx, b.state, b.source, b.created_at, m.display_name
      FROM bans b JOIN members m ON m.chat_id = b.chat_id AND m.user_id = b.user_id WHERE b.chat_id = $1 ORDER BY b.created_at DESC LIMIT 100`,
     [chatId],
   )
@@ -151,7 +167,7 @@ export async function banList(ctx: Ctx, chatId: number): Promise<unknown[]> {
     name: maskName(r.display_name),
     category: r.category,
     category_title: categoryTitle(r.category as string),
-    explanation: jokes.explanations[r.explanation_idx % jokes.explanations.length],
+    explanation: banExplanation(r, jokes),
     image: `/ban-images/${jokes.images[r.image_idx % jokes.images.length]}`,
     state: r.state,
     date: new Date(r.created_at).toISOString(),

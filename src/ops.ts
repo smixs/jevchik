@@ -55,11 +55,13 @@ const LEASE_MS = 5 * 60_000
 const GROUP_SENDS_PER_MINUTE = 20
 const TAG_CALLS_PER_MINUTE = 20
 
-/**
- * Who may get a karma tag (section 3.12): not a bot, not a channel (section 3.6.4), not an administrator or the owner, still in the
- * chat, not refused by Telegram.
- */
-export const TAG_ELIGIBLE = `NOT m.is_bot AND NOT m.is_channel AND m.tag_exempt IS NULL AND COALESCE(m.status, 'member') NOT IN ('creator', 'administrator', 'left', 'kicked')`
+/** Who may carry a tag at all (section 3.12): not a channel (section 3.6.4), not an administrator or the owner, still in the chat, not refused by Telegram. */
+const TAG_CARRIER = `NOT m.is_channel AND m.tag_exempt IS NULL AND COALESCE(m.status, 'member') NOT IN ('creator', 'administrator', 'left', 'kicked')`
+
+/** Who gets a karma tag: a bot only while `bots_in_rating` is on (section 3.9). */
+export function tagEligible(botsIn: boolean): string {
+  return botsIn ? TAG_CARRIER : `NOT m.is_bot AND ${TAG_CARRIER}`
+}
 
 export const NO_PERMISSIONS: ChatPermissions = {
   can_send_messages: false,
@@ -202,7 +204,7 @@ async function attempt(ctx: Ctx, op: Row): Promise<OpOutcome> {
  * an accepted or started appeal, or a record that is gone, cancels it (section 3.6).
  */
 const BAN_STILL_DUE = `(o.operation_kind <> 'ban' OR o.payload->>'banId' IS NULL OR EXISTS (
-  SELECT 1 FROM bans b WHERE b.ban_id::text = o.payload->>'banId' AND b.state = 'steam' AND b.appeal_status NOT IN ('accepted', 'evaluating')))`
+  SELECT 1 FROM bans b WHERE b.ban_id::text = o.payload->>'banId' AND b.state = 'steam' AND b.source = 'auto' AND b.appeal_status NOT IN ('accepted', 'evaluating')))`
 
 async function cancelIfNotDue(ctx: Ctx, op: Row): Promise<OpOutcome> {
   const cancelled = await ctx.db.query(
@@ -282,28 +284,35 @@ function tagIsPresent(member: ChatMemberInfo, want: { tag: string; last: string 
   throw new TagRefusal('human_tag')
 }
 
-/** The member as the tag sees it now, or null when tags are switched off or the member is not subject to a tag. */
-async function tagMember(ctx: Ctx, op: Row): Promise<Row | null> {
-  if (!(await getSettings(ctx.db, op.chat_id)).bool('karma_tag_enabled')) return null
-  const rows = await ctx.db.query(`SELECT m.karma, m.tag_text FROM members m WHERE m.chat_id = $1 AND m.user_id = $2 AND ${TAG_ELIGIBLE}`, [op.chat_id, op.payload.userId])
-  return rows[0] ?? null
+/** An imported history does not say who is a bot; Telegram does. `true` when the bot must stay without a tag. */
+async function foundBot(ctx: Ctx, op: Row, botsIn: boolean): Promise<boolean> {
+  await ctx.db.query('UPDATE members SET is_bot = true WHERE chat_id = $1 AND user_id = $2', [op.chat_id, op.payload.userId])
+  return !botsIn
 }
 
-/** An imported history does not say who is a bot; Telegram does, and a bot leaves the rating and gets no tag. */
-async function markBot(ctx: Ctx, chatId: number, userId: number): Promise<Record<string, unknown>> {
-  await ctx.db.query('UPDATE members SET is_bot = true WHERE chat_id = $1 AND user_id = $2', [chatId, userId])
-  return { skipped: true, bot: true }
+/** With `bots_in_rating` off a bot carries no karma tag: the one the bot set earlier is taken off. */
+async function clearBotTag(ctx: Ctx, op: Row, row: Row): Promise<Record<string, unknown>> {
+  if (row.tag_text === null) return { skipped: true }
+  // only the text this bot set is taken off; a tag somebody put there since stays.
+  const current = (await ctx.tg.getChatMember(op.chat_id, op.payload.userId)).tag ?? ''
+  if (current === row.tag_text) await ctx.tg.setChatMemberTag(op.chat_id, op.payload.userId, '')
+  await ctx.db.query('UPDATE members SET tag_text = NULL, tag_set_at = $3 WHERE chat_id = $1 AND user_id = $2', [op.chat_id, op.payload.userId, ctx.clock.now()])
+  return { cleared: true }
 }
 
 /** The tag takes the karma at the moment of sending; a text equal to the one set last is not sent again. */
 async function performTag(ctx: Ctx, op: Row): Promise<Record<string, unknown>> {
   const { userId, template } = op.payload as { userId: number; template: string }
-  const row = await tagMember(ctx, op)
-  if (row === null) return { skipped: true }
+  const settings = await getSettings(ctx.db, op.chat_id)
+  if (!settings.bool('karma_tag_enabled')) return { skipped: true }
+  const botsIn = settings.bool('bots_in_rating')
+  const row = (await ctx.db.query(`SELECT m.karma, m.tag_text, m.is_bot FROM members m WHERE m.chat_id = $1 AND m.user_id = $2 AND ${tagEligible(true)}`, [op.chat_id, userId]))[0]
+  if (!row) return { skipped: true }
+  if (row.is_bot && !botsIn) return clearBotTag(ctx, op, row)
   const tag = karmaTag(template, row.karma)
   if (tag === row.tag_text) return { skipped: true }
   const member = await ctx.tg.getChatMember(op.chat_id, userId)
-  if (member.is_bot) return markBot(ctx, op.chat_id, userId)
+  if (member.is_bot && !row.is_bot && (await foundBot(ctx, op, botsIn))) return { skipped: true, bot: true }
   const present = tagIsPresent(member, { tag, last: row.tag_text, template })
   if (!present) await ctx.tg.setChatMemberTag(op.chat_id, userId, tag)
   await ctx.db.query('UPDATE members SET tag_text = $3, tag_set_at = $4 WHERE chat_id = $1 AND user_id = $2', [op.chat_id, userId, tag, ctx.clock.now()])

@@ -7,7 +7,8 @@ import { runFlows } from './flows.js'
 import { recoverImports, runImports } from './import.js'
 import { recoverStaleOps, runDueOps } from './ops.js'
 import { registerReportFlow } from './report.js'
-import { registerSanctionFlows, scheduleDueBans } from './sanctions.js'
+import { registerModerationFlows } from './moderation.js'
+import { expireAdminSteam, registerSanctionFlows, scheduleDueBans } from './sanctions.js'
 import { registerSpamCommandFlows } from './spam-command.js'
 import { runDecay, runDigest, runMuteExpiry, runRetention } from './scheduled.js'
 import { runTagPlacement } from './tags.js'
@@ -28,9 +29,11 @@ export function createApp(ctx: Ctx): App {
   registerReportFlow()
   registerSpamCommandFlows()
   registerCardActionFlows()
+  registerModerationFlows()
 
   async function scheduled(): Promise<void> {
     await scheduleDueBans(ctx)
+    await expireAdminSteam(ctx)
     await runMuteExpiry(ctx)
     await runDecay(ctx)
     await runDigest(ctx)

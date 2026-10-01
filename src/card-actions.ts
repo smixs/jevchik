@@ -4,7 +4,7 @@ import type { Ctx } from './ctx.js'
 import type { Q } from './db.js'
 import { createFlow, registerFlow, withReport, type Flow, type StepResult } from './flows.js'
 import { execOp } from './ops.js'
-import { adminBanRecord, banCall, checkTarget, deleteStep, jokePicks, liftStep, markDeleted, markFlow, STEAM_ACTION_STEPS, unbanRecord } from './sanctions.js'
+import { adminBanRecord, banCall, checkTarget, deleteStep, dropJokes, jokePicks, liftStep, markDeleted, markFlow, STEAM_ACTION_STEPS, unbanRecord } from './sanctions.js'
 import { getSettings } from './settings/settings.js'
 import { fitGraphemes } from './text.js'
 
@@ -105,7 +105,7 @@ export async function summarize(ctx: Ctx, flow: Flow): Promise<string> {
 }
 
 /** Day, month, year and time in the chat time zone: 09.09.2026 17:00. */
-function formatWhen(at: Date, timeZone: string): string {
+export function formatWhen(at: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at)
   const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? ''
   return `${get('day')}.${get('month')}.${get('year')} ${get('hour')}:${get('minute')}`
@@ -158,6 +158,11 @@ async function liftSanction(ctx: Ctx, flow: Flow): Promise<StepResult> {
   return liftStep(ctx, flow)
 }
 
+/** «Разбанить» on a request to an administrator lifts silently, like the button in the Mini App (section 3.6.5). */
+async function requestJokes(ctx: Ctx, flow: Flow): Promise<StepResult> {
+  return flow.data.request === true ? dropJokes(ctx, flow) : 'ok'
+}
+
 async function dropRecord(ctx: Ctx, flow: Flow): Promise<StepResult> {
   if (flow.data.liftKind === undefined) return 'ok'
   await unbanRecord(ctx, flow)
@@ -203,7 +208,7 @@ export function registerCardActionFlows(): void {
   // the role of the target is checked before the message is touched; an admin, the owner or an unknown role stops it.
   registerFlow('card_ban', withReport([checkTarget, deleteIfInChat, markDeleted, banCall, adminBanRecord], decide))
   registerFlow('card_restore', withReport([liftSanction, dropRecord, publishText], decide))
-  registerFlow('card_unban', withReport([liftSanction, dropRecord], decide))
+  registerFlow('card_unban', withReport([liftSanction, requestJokes, dropRecord], decide))
   registerFlow('card_unsanction', withReport([liftSanction, dropRecord], decide))
   registerFlow('card_note', [decide])
 }
@@ -218,6 +223,7 @@ const FLOW_KINDS: Record<CardAction, string> = {
   notspam: 'card_note',
   confirm: 'card_note',
   return: 'card_note',
+  keep: 'card_note',
 }
 
 /**
@@ -259,7 +265,9 @@ async function flowData(q: Q, card: CardRow, action: CardAction, state: MessageS
     spam: p.spam ?? null,
     sentAt: msg[0] ? new Date(msg[0].posted_at).toISOString() : undefined,
     inChat: state.inChat,
-    probation: action === 'unban',
+    // Probation follows an appeal the bot doubted, not a request to an administrator (section 3.6.5).
+    probation: action === 'unban' && card.kind === 'appeal_review',
+    request: card.kind === 'unban_request',
     quiet: true,
   }
 }

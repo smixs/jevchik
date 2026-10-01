@@ -130,7 +130,7 @@ describe('the real entry points against doubles', () => {
     })
     expect(health).toEqual({ status: 'ok', db: 'ok' })
     const board = await (await fetch(`http://127.0.0.1:${port}/api/leaderboard?period=all`, { headers: { authorization: `tma ${signedInitData(1, `lb_${CHAT}`)}` } })).json()
-    expect(board.rows).toEqual([{ place: 1, public_id: expect.any(String), name: 'Alice', karma: 0.525, is_me: true, is_channel: false }])
+    expect(board.rows).toEqual([{ place: 1, public_id: expect.any(String), name: 'Alice', karma: 0.525, is_me: true, is_channel: false, is_bot: false }])
     const page = await fetch(`http://127.0.0.1:${port}/`)
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('id="app"')

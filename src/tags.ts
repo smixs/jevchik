@@ -1,6 +1,6 @@
 import type { Ctx } from './ctx.js'
 import type { Q } from './db.js'
-import { submitOpIn, TAG_ELIGIBLE, type OpSpec } from './ops.js'
+import { submitOpIn, tagEligible, type OpSpec } from './ops.js'
 import { getSettings, getSettingsWithVersions, SettingsView } from './settings/settings.js'
 import { karmaTag } from './text.js'
 
@@ -36,7 +36,7 @@ interface TagChange extends TagTarget {
 /** Section 3.12: a change of the whole karma value queues a `set_tag` operation, unless the text is already set or one is waiting. */
 export async function queueTag(q: Q, change: TagChange): Promise<void> {
   if (!change.settings.bool('karma_tag_enabled')) return
-  const rows = await q.query(`SELECT m.tag_text FROM members m WHERE m.chat_id = $1 AND m.user_id = $2 AND ${TAG_ELIGIBLE} AND ${NO_WAITING_TAG}`, [
+  const rows = await q.query(`SELECT m.tag_text FROM members m WHERE m.chat_id = $1 AND m.user_id = $2 AND ${tagEligible(change.settings.bool('bots_in_rating'))} AND ${NO_WAITING_TAG}`, [
     change.chatId,
     change.userId,
   ])
@@ -48,7 +48,7 @@ export async function queueTag(q: Q, change: TagChange): Promise<void> {
 async function placeTags(q: Q, chat: { chatId: number; key: string; now: Date }, settings: SettingsView): Promise<void> {
   const members = await q.query(
     `SELECT m.user_id, m.karma, m.tag_text FROM members m
-     WHERE m.chat_id = $1 AND ${TAG_ELIGIBLE} AND ${NO_WAITING_TAG}
+     WHERE m.chat_id = $1 AND ${tagEligible(settings.bool('bots_in_rating'))} AND ${NO_WAITING_TAG}
        AND EXISTS (SELECT 1 FROM karma_events e WHERE e.chat_id = m.chat_id AND e.user_id = m.user_id)
      ORDER BY m.user_id`,
     [chat.chatId],
@@ -84,6 +84,13 @@ async function importsWithoutPlacement(ctx: Ctx, chatId: number): Promise<number
   return rows.map((r) => r.job_id as number)
 }
 
+/** Section 3.9: with `bots_in_rating` off, the karma tags the bot set on bots earlier are taken off, through the same queue. */
+async function clearBotTags(ctx: Ctx, chatId: number, version: number, settings: SettingsView): Promise<void> {
+  const now = ctx.clock.now()
+  const bots = await ctx.db.query(`SELECT m.user_id FROM members m WHERE m.chat_id = $1 AND m.is_bot AND m.tag_text IS NOT NULL AND ${NO_WAITING_TAG} ORDER BY m.user_id`, [chatId])
+  for (const bot of bots) await submitOpIn(ctx.db, now, tagOp({ chatId, userId: bot.user_id, key: `botclear:v${version}` }, settings))
+}
+
 /**
  * The first placement, while `karma_tag_enabled` is on: once per version of that setting (the default for chats that existed
  * before tags, and every switch back on), and for every finished import whose own placement did not happen.
@@ -96,5 +103,7 @@ export async function runTagPlacement(ctx: Ctx): Promise<void> {
     const settings = new SettingsView(values)
     await placeOnce(ctx, chatId, `v${versions.karma_tag_enabled}`, settings)
     for (const jobId of await importsWithoutPlacement(ctx, chatId)) await placeOnce(ctx, chatId, `import:${jobId}`, settings)
+    if (settings.bool('bots_in_rating')) await placeOnce(ctx, chatId, `bots:v${versions.bots_in_rating}`, settings)
+    else await clearBotTags(ctx, chatId, versions.bots_in_rating, settings)
   }
 }

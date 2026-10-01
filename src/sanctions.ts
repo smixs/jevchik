@@ -14,6 +14,9 @@ export interface Jokes {
   replies: string[]
   explanations: string[]
   images: string[]
+  /** Section 3.6.5: what the bot says when an administrator sanctions a member from the Mini App. */
+  admin_steam: string[]
+  admin_ban: string[]
 }
 
 let jokes: Jokes | null = null
@@ -218,7 +221,7 @@ async function recordStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
   return 'ok'
 }
 
-function appealUrl(ctx: Ctx, chatId: number): string {
+export function appealUrl(ctx: Ctx, chatId: number): string {
   return `https://t.me/${ctx.env.botUsername}?startapp=appeal_${chatId}`
 }
 
@@ -239,8 +242,8 @@ async function reviewCardStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
 // ---------------------------------------------------------------- ban transition
 
 async function banAllowed(ctx: Ctx, flow: Flow): Promise<boolean> {
-  const rows = await ctx.db.query('SELECT state, appeal_status FROM bans WHERE ban_id = $1', [flow.data.banId])
-  return rows[0]?.state === 'steam' && !['accepted', 'evaluating'].includes(rows[0].appeal_status)
+  const rows = await ctx.db.query('SELECT state, appeal_status, source FROM bans WHERE ban_id = $1', [flow.data.banId])
+  return rows[0]?.state === 'steam' && rows[0].source === 'auto' && !['accepted', 'evaluating'].includes(rows[0].appeal_status)
 }
 
 async function banStillDue(ctx: Ctx, flow: Flow): Promise<StepResult> {
@@ -264,7 +267,8 @@ export async function banCall(ctx: Ctx, flow: Flow): Promise<StepResult> {
 }
 
 async function banRecord(ctx: Ctx, flow: Flow): Promise<StepResult> {
-  await ctx.db.query(`UPDATE bans SET state = 'banned' WHERE ban_id = $1 AND state = 'steam'`, [flow.data.banId])
+  // an administrator may have taken the record over while the call was on its way: theirs is not touched.
+  await ctx.db.query(`UPDATE bans SET state = 'banned' WHERE ban_id = $1 AND state = 'steam' AND source = 'auto'`, [flow.data.banId])
   return 'ok'
 }
 
@@ -295,10 +299,46 @@ export async function liftStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
   return outcome.status === 'completed' ? 'ok' : 'stop'
 }
 
+/**
+ * Section 3.6.5: a request to lift a sanction belongs to that sanction. When the sanction is replaced, lifted or over, its open
+ * request cards are closed, so that an old button never decides about a new sanction. The card whose own button
+ * is being carried out is closed by its flow.
+ */
+export async function closeRequests(q: Q, chatId: number, userId: number, except: number | null = null): Promise<void> {
+  await q.query(
+    `UPDATE admin_cards SET status = 'resolved', resolution = 'obsolete'
+     WHERE chat_id = $1 AND kind = 'unban_request' AND status = 'open' AND payload->>'targetUserId' = $2 AND card_id IS DISTINCT FROM $3`,
+    [chatId, String(userId), except],
+  )
+}
+
+/**
+ * The lifting by an administrator is silent (section 3.6.5): what the bot said in the chat about this sanction goes away with
+ * it. Only the jokes since the record was made are taken; the term comes from the flow or from the record still in place.
+ */
+export async function dropJokes(ctx: Ctx, flow: Flow): Promise<StepResult> {
+  const since = flow.data.since ?? (await ctx.db.query('SELECT created_at FROM bans WHERE chat_id = $1 AND user_id = $2', [flow.chatId, flow.data.userId]))[0]?.created_at
+  if (!since) return 'ok'
+  const jokes = await ctx.db.query(
+    `SELECT o.result->>'message_id' AS id, o.completed_at FROM flows f
+     JOIN operations o ON o.chat_id = f.chat_id AND o.idempotency_key = f.idempotency_key || ':send'
+     WHERE f.chat_id = $1 AND f.data->>'userId' = $2 AND o.status = 'completed' AND o.result ? 'message_id' AND o.completed_at >= $3
+     ORDER BY o.operation_id DESC LIMIT 5`,
+    [flow.chatId, String(flow.data.userId), new Date(since)],
+  )
+  let waits = false
+  for (const joke of jokes) {
+    const outcome = await execOp(ctx, { chatId: flow.chatId, key: `${flow.key}:joke:${joke.id}`, kind: 'delete_message', payload: { messageId: Number(joke.id), sentAt: new Date(joke.completed_at).toISOString() } })
+    waits ||= waiting(outcome)
+  }
+  return waits ? 'wait' : 'ok'
+}
+
 export async function unbanRecord(ctx: Ctx, flow: Flow): Promise<StepResult> {
   const settings = await getSettings(ctx.db, flow.chatId, flow.settingsSeq)
   await ctx.db.tx(async (q) => {
     await q.query('DELETE FROM bans WHERE chat_id = $1 AND user_id = $2', [flow.chatId, flow.data.userId])
+    await closeRequests(q, flow.chatId, flow.data.userId, flow.data.cardId ?? null)
     if (flow.data.probation === true) {
       await q.query('UPDATE members SET probation_left = $3 WHERE chat_id = $1 AND user_id = $2', [
         flow.chatId,
@@ -451,7 +491,7 @@ export async function startUnban(q: Q, target: { chatId: number; userId: number;
 export async function scheduleDueBans(ctx: Ctx): Promise<number> {
   const now = ctx.clock.now()
   const due = await ctx.db.query(
-    `SELECT ban_id, chat_id, user_id FROM bans WHERE state = 'steam' AND steam_until <= $1 AND appeal_status IN ('none','rejected','review')`,
+    `SELECT ban_id, chat_id, user_id FROM bans WHERE state = 'steam' AND source = 'auto' AND steam_until <= $1 AND appeal_status IN ('none','rejected','review')`,
     [now],
   )
   for (const ban of due) {
@@ -464,4 +504,12 @@ export async function scheduleDueBans(ctx: Ctx): Promise<number> {
     })
   }
   return due.length
+}
+
+/** Section 3.6.5: the steam room an administrator gave ends by itself: Telegram lifts the restriction, the record goes away. */
+export async function expireAdminSteam(ctx: Ctx): Promise<void> {
+  await ctx.db.tx(async (q) => {
+    const over = await q.query(`DELETE FROM bans WHERE source = 'admin' AND state = 'steam' AND steam_until <= $1 RETURNING chat_id, user_id`, [ctx.clock.now()])
+    for (const ban of over) await closeRequests(q, ban.chat_id, ban.user_id)
+  })
 }

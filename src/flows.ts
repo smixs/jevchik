@@ -104,6 +104,19 @@ export async function runFlows(ctx: Ctx, limit = 50): Promise<number> {
   return claimed.length
 }
 
+/**
+ * Creates a flow already held by this process and runs it at once: no other process can take it in between (the web process
+ * answers an administrator with the result, section 3.6.5). A step that waits leaves the flow to the usual loop after the lease.
+ */
+export async function startFlowNow(ctx: Ctx, q: Q, flow: NewFlow): Promise<() => Promise<void>> {
+  const rows = await q.query(
+    `INSERT INTO flows (chat_id, kind, idempotency_key, data, next_attempt_at, settings_seq, created_at)
+     VALUES ($1,$2,$3,$4,$6,(SELECT COALESCE(max(seq), 0) FROM chat_settings WHERE chat_id = $1),$5) RETURNING *`,
+    [flow.chatId, flow.kind, flow.key, JSON.stringify(flow.data), flow.now, new Date(flow.now.getTime() + LEASE_MS)],
+  )
+  return () => runClaimed(ctx, rows, flow.now)
+}
+
 /** Runs one flow at once, when it is due and nobody else holds it (the answer to a pressed button, section 3.6.2). */
 export async function runFlowNow(ctx: Ctx, chatId: number, key: string): Promise<{ status: string; data: Record<string, unknown> } | null> {
   const now = ctx.clock.now()

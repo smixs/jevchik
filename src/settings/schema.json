@@ -468,6 +468,12 @@
       "maximum": 366
     },
     {
+      "name": "bots_in_rating",
+      "type": "boolean",
+      "default": false,
+      "nullable": false
+    },
+    {
       "name": "karma_tag_enabled",
       "type": "boolean",
       "default": true,

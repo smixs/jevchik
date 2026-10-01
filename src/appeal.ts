@@ -8,6 +8,7 @@ import { getSettings } from './settings/settings.js'
 import { graphemeLength } from './text.js'
 import { extractAppeal } from './appeal-answer.js'
 import { isChannelId } from './members.js'
+import { sanctionOf } from './moderation.js'
 
 const APPEAL_MAX_CHARS = 500
 const CLAIM_TIMEOUT_MS = 2 * 60_000
@@ -24,6 +25,7 @@ export type AppealResult =
 
 interface BanRow {
   ban_id: string
+  source: string
   state: string
   appeal_status: string
   bans_count: number
@@ -32,7 +34,7 @@ interface BanRow {
 
 async function loadBan(ctx: Ctx, chatId: number, userId: number): Promise<BanRow | null> {
   const rows = await ctx.db.query<BanRow>(
-    `SELECT b.ban_id, b.state, b.appeal_status, m.bans_count, m.display_name FROM bans b
+    `SELECT b.ban_id, b.source, b.state, b.appeal_status, m.bans_count, m.display_name FROM bans b
      JOIN members m ON m.chat_id = b.chat_id AND m.user_id = b.user_id WHERE b.chat_id = $1 AND b.user_id = $2`,
     [chatId, userId],
   )
@@ -79,26 +81,29 @@ async function resumeAccepted(ctx: Ctx, chatId: number, userId: number, ban: Ban
   return left ? { status: 'accepted', lifted: false } : { status: 'accepted', lifted: true }
 }
 
+/** The verdict is written only to the automatic record that was being judged; `false` when an administrator took it over. */
+async function settle(ctx: Ctx, ban: BanRow, status: string): Promise<boolean> {
+  const rows = await ctx.db.query(`UPDATE bans SET appeal_status = $2 WHERE ban_id = $1 AND source = 'auto' AND appeal_status = 'evaluating' RETURNING 1`, [ban.ban_id, status])
+  return rows.length > 0
+}
+
 async function verdict(ctx: Ctx, who: { chatId: number; userId: number; ban: BanRow }, score: number): Promise<AppealResult> {
   const { chatId, userId, ban } = who
   const settings = await getSettings(ctx.db, chatId)
   const now = ctx.clock.now()
-  if (score >= settings.num('appeal_accept')) {
-    await ctx.db.query(`UPDATE bans SET appeal_status = 'accepted' WHERE ban_id = $1`, [ban.ban_id])
-    return resumeAccepted(ctx, chatId, userId, ban)
-  }
-  if (score < settings.num('appeal_reject')) {
-    await ctx.db.query(`UPDATE bans SET appeal_status = 'rejected' WHERE ban_id = $1`, [ban.ban_id])
-    return { status: 'rejected' }
-  }
-  await ctx.db.query(`UPDATE bans SET appeal_status = 'review' WHERE ban_id = $1`, [ban.ban_id])
-  await createCard(ctx.db, { chatId, key: `appeal:${ban.ban_id}`, kind: 'appeal_review', payload: { targetUserId: userId, targetName: ban.display_name, probation: true }, now })
-  return { status: 'review' }
+  const status = score >= settings.num('appeal_accept') ? 'accepted' : score < settings.num('appeal_reject') ? 'rejected' : 'review'
+  if (!(await settle(ctx, ban, status))) return { status: 'not_allowed' }
+  if (status === 'accepted') return resumeAccepted(ctx, chatId, userId, ban)
+  if (status === 'review') await createCard(ctx.db, { chatId, key: `appeal:${ban.ban_id}`, kind: 'appeal_review', payload: { targetUserId: userId, targetName: ban.display_name, probation: true }, now })
+  return { status }
 }
 
-/** One appeal per member, after the first bath only; a channel has no appeal in the Mini App (section 3.6.4). */
+/**
+ * One appeal per member, after the first bath only; a channel has no appeal in the Mini App (section 3.6.4). A sanction of an
+ * administrator is not judged by the model: the member asks the administrators (section 3.6.5).
+ */
 function appealAllowed(ban: BanRow, userId: number): boolean {
-  return ban.bans_count <= 1 && !isChannelId(userId)
+  return ban.source === 'auto' && ban.bans_count <= 1 && !isChannelId(userId)
 }
 
 async function release(ctx: Ctx, ban: BanRow): Promise<void> {
@@ -125,8 +130,9 @@ export async function submitAppeal(ctx: Ctx, chatId: number, userId: number, raw
   return verdict(ctx, { chatId, userId, ban }, score)
 }
 
-export async function appealState(ctx: Ctx, chatId: number, userId: number): Promise<{ status: string; allowed: boolean }> {
+export async function appealState(ctx: Ctx, chatId: number, userId: number): Promise<{ status: string; allowed: boolean; source?: string; sanction?: string }> {
   const ban = await loadBan(ctx, chatId, userId)
   if (!ban) return { status: 'no_ban', allowed: false }
+  if (ban.source === 'admin') return { status: ban.appeal_status, allowed: ban.appeal_status === 'none', source: 'admin', sanction: (await sanctionOf(ctx.db, chatId, userId))?.own }
   return { status: ban.appeal_status, allowed: appealAllowed(ban, userId) && ban.appeal_status === 'none' }
 }

@@ -96,6 +96,11 @@ function channelMark(item: Dict): Child {
   return item.is_channel === true && h('span', { class: 'chan', 'data-field': 'channel' }, picture('/img/megaphone.webp', 'mega', 18), 'канал')
 }
 
+/** The mark of a bot: bots stand in the leaderboard only while the admin keeps «Боты в рейтинге» on. */
+function botMark(item: Dict): Child {
+  return item.is_bot === true && h('span', { class: 'chan bot', 'data-field': 'bot' }, 'бот')
+}
+
 class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -214,7 +219,7 @@ async function showPeriod(period: string): Promise<void> {
 
 function board(data: Dict): HTMLElement {
   const rows = list(data.rows).map((row) => {
-    const who = h('span', { class: 'who' }, h('span', { class: 'name' }, s(row.name)), channelMark(row))
+    const who = h('span', { class: 'who' }, h('span', { class: 'name' }, s(row.name)), channelMark(row), botMark(row))
     const button = h('button', { class: `row${row.is_me ? ' me' : ''}`, 'data-public-id': s(row.public_id) }, place(n(row.place)), avatar(s(row.public_id), s(row.name)), who, h('span', { class: 'num' }, fmt(row.karma)))
     button.addEventListener('click', () => {
       juice.pageOpened()
@@ -304,7 +309,7 @@ function hideButton(page: Dict): HTMLElement {
 function pageView(page: Dict, self: boolean): Child[] {
   const messages = dict(page.messages)
   return [
-    h('div', { class: 'title' }, h('h1', {}, s(page.name) || 'Моя страница'), channelMark(page)),
+    h('div', { class: 'title' }, h('h1', {}, s(page.name) || 'Моя страница'), channelMark(page), botMark(page)),
     page.empty ? empty('Здесь появятся ваши цифры, когда вы напишете в чате и получите первые оценки.') : null,
     decayNote(dict(page.decay_warning)),
     statsGrid(page),
@@ -321,26 +326,129 @@ async function meScreen(): Promise<Child[]> {
 }
 
 async function pageScreen(publicId: string): Promise<Child[]> {
+  const mod = viewerIsAdmin ? await api(`/api/admin/members/${publicId}`).then(modPanel).catch(() => null) : null
   try {
-    return pageView(await api(`/api/members/${publicId}`), false)
+    // the moderation block goes right under the name, so an admin does not scroll for it
+    const [title, ...rest] = pageView(await api(`/api/members/${publicId}`), false)
+    return [title, mod, ...rest]
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return [h('p', { class: 'hint' }, 'Участник скрыл свою страницу.')]
+    if (error instanceof ApiError && error.status === 404) return [h('p', { class: 'hint' }, 'Участник скрыл свою страницу.'), mod]
     throw error
   }
 }
 
+// ---------------------------------------------------------------- moderation by an admin
+
+/** Whether the viewer is an admin of the chat, by the last answer of the server; the server checks every action again. */
+let viewerIsAdmin = false
+
+/** A dangerous action is done on the second press; the first one asks. */
+function confirmButton(label: string, question: string, attrs: Record<string, string>, run: () => void): HTMLElement {
+  const button = h('button', { class: 'danger', ...attrs }, label)
+  let armed = false
+  button.addEventListener('click', () => {
+    if (armed) return run()
+    armed = true
+    button.textContent = question
+    setTimeout(() => {
+      armed = false
+      button.textContent = label
+    }, 4000)
+  })
+  return button
+}
+
+const STEAM_TERMS: Array<[number, string]> = [[1, '1 час'], [24, 'Сутки'], [168, 'Неделя']]
+
+/** Sends an action of an admin and gives the answer of the server: what happened in words and the member after it. */
+async function moderate(publicId: string, action: string, body: Dict = {}): Promise<{ ok: boolean; text: string; member: Dict | null }> {
+  try {
+    const r = await api(`/api/admin/members/${publicId}/${action}`, { method: 'POST', body: JSON.stringify(body) })
+    return { ok: r.ok === true, text: s(r.text), member: dict(r.member) }
+  } catch (error) {
+    return { ok: false, text: error instanceof ApiError && error.status === 403 ? 'Только для админов чата.' : 'Не получилось, попробуйте позже.', member: null }
+  }
+}
+
+/** What an admin may do with a member: the steam room for a term, a ban, and the lifting of either. */
+function modPanel(member: Dict): HTMLElement {
+  const box = h('section', { class: 'card mod', 'data-field': 'mod' })
+  const draw = (m: Dict, note = '', ok = true): void => {
+    const sanction = dict(m.sanction)
+    const state = s(sanction.state)
+    const status = h('p', { role: 'status', 'data-field': 'mod_result', class: ok ? 'hint' : 'error' }, note)
+    const act = (action: string, body?: Dict): void => {
+      box.setAttribute('aria-busy', 'true')
+      void moderate(s(m.public_id), action, body).then((r) => {
+        box.removeAttribute('aria-busy')
+        draw(r.member ?? m, r.text, r.ok)
+        const shown = box.querySelector('[data-field=mod_result]') as HTMLElement
+        if (r.ok) juice.saved(shown)
+        else juice.failed(shown)
+      })
+    }
+    const terms = h('div', { class: 'row2 terms', hidden: '' }, ...STEAM_TERMS.map(([hours, label]) => {
+      const button = h('button', { class: 'secondary', 'data-hours': String(hours) }, label)
+      button.addEventListener('click', () => act('steam', { hours }))
+      return button
+    }))
+    const steam = h('button', { class: 'secondary', 'data-action': 'steam' }, 'В парилку')
+    steam.addEventListener('click', () => terms.toggleAttribute('hidden'))
+    const ban = confirmButton('Забанить', 'Точно забанить?', { 'data-action': 'ban' }, () => act('ban'))
+    const unban = h('button', { class: 'primary', 'data-action': 'unban' }, state === 'banned' ? 'Разбанить' : 'Выпустить из парилки')
+    unban.addEventListener('click', () => act('unban'))
+    const buttons = state === 'banned' ? [unban] : state === 'steam' ? [unban, ban] : m.is_channel === true ? [ban] : [steam, ban]
+    box.replaceChildren(
+      h('h2', {}, 'Модерация'),
+      h('p', { 'data-field': 'mod_state' }, state ? `Сейчас: ${s(sanction.text)}.` : 'Наказаний нет.'),
+      h('div', { class: 'row2' }, ...buttons),
+      terms,
+      note ? status : '',
+    )
+  }
+  draw(member)
+  return box
+}
+
 // ---------------------------------------------------------------- bans and appeal
 
+/** For an admin a card of the bath carries the real name in its title, the sanction in words and the button that lifts it. */
+function banControls(m: Dict): HTMLElement {
+  const state = s(dict(m.sanction).state)
+  const result = h('p', { role: 'status', 'data-field': 'mod_result' })
+  const unban = h('button', { class: 'secondary', 'data-action': 'unban' }, state === 'banned' ? 'Разбанить' : 'Выпустить из парилки')
+  const page = h('button', { class: 'secondary', 'data-action': 'page' }, 'Страница')
+  page.addEventListener('click', () => void render(() => pageScreen(s(m.public_id)), () => juice.pageShown(root)))
+  const box = h('div', { class: 'row2' }, unban, page)
+  unban.addEventListener('click', () => {
+    unban.setAttribute('disabled', '')
+    void moderate(s(m.public_id), 'unban').then((r) => {
+      result.textContent = r.text
+      result.className = r.ok ? 'hint' : 'error'
+      if (r.ok) {
+        unban.remove()
+        juice.saved(result)
+      } else {
+        unban.removeAttribute('disabled')
+        juice.failed(result)
+      }
+    })
+  })
+  return h('div', { class: 'mod', 'data-field': 'mod' }, h('p', { 'data-field': 'mod_state' }, `Сейчас: ${s(dict(m.sanction).text)}.`), box, result)
+}
+
 async function bansScreen(): Promise<Child[]> {
-  const data = await api('/api/bans')
-  const cards = list(data.bans).map((b) =>
-    h(
+  const [data, managed] = await Promise.all([api('/api/bans'), viewerIsAdmin ? api('/api/admin/bans').catch(() => ({}) as Dict) : Promise.resolve({} as Dict)])
+  const controls = new Map(list(managed.bans).map((m) => [s(m.ban_id), m]))
+  const cards = list(data.bans).map((b) => {
+    const mine = controls.get(s(b.id))
+    return h(
       'article',
       { class: 'card ban-card', 'data-ban-id': s(b.id) },
       picture(s(b.image), 'ban', 80),
-      h('div', { class: 'body' }, h('h2', {}, s(b.name)), h('p', { 'data-field': 'category' }, s(b.category_title)), h('p', { class: 'hint', 'data-field': 'explanation' }, s(b.explanation)), h('p', { class: 'hint' }, new Date(s(b.date)).toLocaleDateString('ru-RU'))),
-    ),
-  )
+      h('div', { class: 'body' }, h('h2', {}, mine ? `${s(mine.name)}${mine.username ? ` (@${s(mine.username)})` : ''}` : s(b.name)), h('p', { 'data-field': 'category' }, s(b.category_title)), h('p', { class: 'hint', 'data-field': 'explanation' }, s(b.explanation)), h('p', { class: 'hint' }, new Date(s(b.date)).toLocaleDateString('ru-RU')), mine ? banControls(mine) : null),
+    )
+  })
   return [h('h1', {}, 'Баня'), ...(cards.length ? cards : [empty('В бане пусто.')])]
 }
 
@@ -361,8 +469,38 @@ function appealFeel(status: string, lifted: boolean, button: HTMLElement, result
   juice.appealWaiting(result)
 }
 
+const REQUEST_TEXT: Record<string, string> = {
+  review: 'Просьба у админов, ждите решения.',
+  rejected: 'Админы оставили наказание в силе.',
+  no_ban: 'Наказания уже нет.',
+  not_allowed: 'Просьба недоступна.',
+}
+
+/** Section 3.6.5: a sanction of an admin is lifted only by an admin; the member may ask once. */
+function requestScreen(state: Dict): Child[] {
+  const result = h('p', { 'data-field': 'appeal_result', role: 'status' })
+  const ask = h('button', { class: 'primary', 'data-action': 'request' }, 'Попросить разбан')
+  ask.addEventListener('click', () => {
+    ask.setAttribute('disabled', '')
+    void api('/api/appeal/request', { method: 'POST' })
+      .then((r) => {
+        result.textContent = REQUEST_TEXT[s(r.status)] ?? 'Готово.'
+        ask.remove()
+        juice.appealWaiting(result)
+      })
+      .catch(() => {
+        result.textContent = 'Не получилось, попробуйте позже.'
+        ask.removeAttribute('disabled')
+        juice.failed(result)
+      })
+  })
+  const asked = state.status !== 'none'
+  return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, h('p', { 'data-field': 'sanction' }, `Вы ${s(state.sanction)}.`), h('p', { class: 'hint' }, 'Это решение админа. Снять его может только админ; попросить можно один раз.'), asked ? h('p', { 'data-field': 'appeal_state' }, REQUEST_TEXT[s(state.status)] ?? 'Просьба недоступна.') : ask, result)]
+}
+
 async function appealScreen(): Promise<Child[]> {
   const state = await api('/api/appeal')
+  if (state.source === 'admin') return requestScreen(state)
   const result = h('p', { 'data-field': 'appeal_result', role: 'status' })
   const area = h('textarea', { maxlength: '500', rows: '5', 'aria-label': 'Объяснение', hidden: '' })
   const send = h('button', { class: 'primary', hidden: '' }, 'Отправить')
@@ -458,8 +596,66 @@ async function settingsForm(): Promise<HTMLElement> {
   const values = dict(data.values)
   const versions = dict(data.versions)
   const box = h('section', { class: 'card', 'data-field': 'settings' }, h('h2', {}, 'Настройки'))
-  for (const spec of list(dict(data.schema).keys)) box.append(...settingRow(spec, values, versions))
+  // «Боты в рейтинге» has its own checkbox at the top of the screen.
+  for (const spec of list(dict(data.schema).keys)) if (s(spec.name) !== 'bots_in_rating') box.append(...settingRow(spec, values, versions))
   return box
+}
+
+/** Section 3.9: the checkbox «Боты в рейтинге»: on, bots stand in the leaderboard and get the karma tag; off, neither. */
+async function botsToggle(): Promise<HTMLElement> {
+  const data = await api('/api/admin/settings')
+  const versions = dict(data.versions)
+  const box = h('input', { type: 'checkbox', id: 'bots-in-rating', 'data-key': 'bots_in_rating' }) as HTMLInputElement
+  box.checked = dict(data.values).bots_in_rating === true
+  const status = h('span', { class: 'hint', role: 'status' })
+  box.addEventListener('change', () => {
+    const wanted = box.checked
+    box.disabled = true
+    saveSetting('bots_in_rating', { value: wanted, base_version: n(versions.bots_in_rating) })
+      .then(
+        (version) => {
+          versions.bots_in_rating = version
+          status.textContent = wanted ? 'Боты включены в рейтинг' : 'Боты исключены из рейтинга'
+          juice.saved(status)
+        },
+        (error: unknown) => {
+          box.checked = !wanted
+          status.textContent = describeError(error)
+          juice.failed(status)
+        },
+      )
+      .finally(() => (box.disabled = false))
+  })
+  return h('section', { class: 'card', 'data-field': 'bots' }, h('label', { class: 'check', for: 'bots-in-rating' }, box, h('span', {}, 'Боты в рейтинге')), h('p', { class: 'hint' }, 'Выключено: ботов нет в лидерборде и у них нет тега с кармой. Включено: боты стоят в лидерборде с пометкой «бот» и получают тег.'), status)
+}
+
+/** Section 3.6.5: any member by a part of the name or of the username; a tap opens the page with the moderation buttons. */
+function memberSearch(): HTMLElement {
+  const input = h('input', { type: 'text', placeholder: 'Имя или @username', 'aria-label': 'Найти участника', 'data-field': 'member_query' }) as HTMLInputElement
+  const found = h('div', { class: 'list', 'data-field': 'member_results' })
+  const find = h('button', { class: 'secondary', 'data-action': 'find' }, 'Найти')
+  const search = (): void => {
+    void api(`/api/admin/members?q=${encodeURIComponent(input.value)}`).then(
+      (data) => {
+        const rows = list(data.members).map((m) => {
+          const sanction = s(dict(m.sanction).text)
+          const button = h('button', { class: 'row', 'data-public-id': s(m.public_id) }, avatar(s(m.public_id), s(m.name)), h('span', { class: 'who' }, h('span', { class: 'name' }, s(m.name)), sanction ? h('span', { class: 'hint' }, sanction) : null), h('span', { class: 'num' }, fmt(m.karma)))
+          button.addEventListener('click', () => void render(() => pageScreen(s(m.public_id)), () => juice.pageShown(root)))
+          return button
+        })
+        found.replaceChildren(...(rows.length ? rows : [h('p', { class: 'hint' }, 'Никого не нашёл. Нужно хотя бы две буквы.')]))
+      },
+      (error: unknown) => found.replaceChildren(failure(error)),
+    )
+  }
+  find.addEventListener('click', search)
+  input.addEventListener('keydown', (event) => (event as KeyboardEvent).key === 'Enter' && search())
+  return h('section', { class: 'card', 'data-field': 'moderation' }, h('h2', {}, 'Участники'), h('p', { class: 'hint' }, 'Найдите участника и откройте его страницу: там кнопки «В парилку», «Забанить», «Разбанить».'), h('div', { class: 'row2' }, input, find), found)
+}
+
+function modLogView(log: Dict[]): HTMLElement {
+  const lines = log.map((a) => h('p', { class: a.ok === true ? '' : 'hint' }, `${new Date(s(a.date)).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} ${s(a.admin)}: ${s(a.summary)}`))
+  return h('section', { class: 'card list', 'data-field': 'modlog' }, h('h2', {}, 'Журнал наказаний'), ...(lines.length ? lines : [h('p', { class: 'hint' }, 'Пока пусто.')]))
 }
 
 /** The card as admins got it in Telegram: the text is plain text, the link opens the message. */
@@ -476,7 +672,7 @@ function cardView(c: Dict): HTMLElement {
 
 async function adminScreen(): Promise<Child[]> {
   await api('/api/admin/whoami')
-  const [audit, ops, cards, imp, obs, held] = await Promise.all([api('/api/admin/audit'), api('/api/admin/operations'), api('/api/admin/cards'), api('/api/admin/import'), api('/api/admin/observation'), api('/api/admin/held')])
+  const [audit, ops, cards, imp, obs, held, modlog] = await Promise.all([api('/api/admin/audit'), api('/api/admin/operations'), api('/api/admin/cards'), api('/api/admin/import'), api('/api/admin/observation'), api('/api/admin/held'), api('/api/admin/modlog')])
   const file = h('input', { type: 'file', accept: 'application/json', 'aria-label': 'Файл экспорта Telegram Desktop', class: 'sr-only' }) as HTMLInputElement
   const chosenName = h('span', { class: 'hint' }, 'Файл не выбран')
   file.addEventListener('change', () => (chosenName.textContent = file.files?.[0]?.name ?? 'Файл не выбран'))
@@ -512,6 +708,9 @@ async function adminScreen(): Promise<Child[]> {
   )
   return [
     h('h1', {}, 'Экран админа'),
+    await botsToggle(),
+    memberSearch(),
+    modLogView(list(modlog.log)),
     h('section', { class: 'card' }, obsStatus, h('div', { class: 'row2' }, until, extend)),
     h('section', { class: 'card' }, h('h2', {}, 'Импорт истории'), h('p', { class: 'hint' }, 'Файл берётся на доверии: совпадение номера чата защищает от ошибки, но не доказывает, что файл настоящий. Берётся окно из настройки import_days (по умолчанию 90 суток), только плюсы.'), picker, upload, importStatus),
     h('section', { class: 'card list', 'data-field': 'operations' }, h('h2', {}, 'Операции с проблемами'), ...list(ops.operations).map((o) => h('p', {}, `${s(o.operation_kind)}: ${s(o.status)} ${s(o.last_error_code)}`))),
@@ -570,6 +769,7 @@ function showHeader(context: Dict): void {
 }
 
 function enter(context: Dict): void {
+  viewerIsAdmin = dict(context.viewer).is_admin === true
   showHeader(context)
   const tabs = showTabs(dict(context.viewer))
   if (!navigated) open(tabs.includes(s(context.screen)) ? s(context.screen) : 'lb')

@@ -12,6 +12,7 @@ export type CardKind =
   | 'would_do'
   | 'media_unverified'
   | 'appeal_review'
+  | 'unban_request'
   | 'target_admin'
   | 'no_rights'
   | 'delete_denied'
@@ -35,6 +36,8 @@ export interface CardPayload {
   recipient?: number
   /** A card about a command message (its deletion failed): nothing to decide about it. */
   noActions?: boolean
+  /** The sanction the member asks to lift (section 3.6.5): what it is, until when, who gave it. */
+  note?: string
 }
 
 export interface CardRow {
@@ -56,6 +59,7 @@ const TITLES: Record<CardKind, string> = {
   would_do: 'Старая карточка, бот по ней ничего не сделал',
   media_unverified: 'Новичок прислал медиа без подписи, описать его не удалось, реши',
   appeal_review: 'Объяснение при разбане вызвало сомнение',
+  unban_request: 'Участник просит разбан',
   target_admin: 'Участник - админ, наказывать не стал',
   no_rights: 'Не хватило прав, чтобы заглушить участника',
   delete_denied: 'Не смог удалить сообщение',
@@ -81,7 +85,7 @@ const DONE: Partial<Record<CardKind, string>> = {
   report: `${LEFT_IN_CHAT} до решения админа`,
 }
 
-export type CardAction = 'spam' | 'notspam' | 'restore' | 'ban' | 'confirm' | 'return' | 'unban'
+export type CardAction = 'spam' | 'notspam' | 'restore' | 'ban' | 'confirm' | 'return' | 'unban' | 'keep'
 
 const LABELS: Record<CardAction, string> = {
   spam: 'Спам',
@@ -91,6 +95,7 @@ const LABELS: Record<CardAction, string> = {
   confirm: 'Подтвердить',
   return: 'Вернуть',
   unban: 'Разбанить',
+  keep: 'Оставить',
 }
 
 /**
@@ -127,6 +132,7 @@ export function allowedActions(card: CardRow, state: MessageState): CardAction[]
   if (card.kind === 'spam_command') return ['restore']
   if (card.kind === 'report') return ['confirm', 'return']
   if (card.kind === 'appeal_review') return ['unban', 'ban']
+  if (card.kind === 'unban_request') return state.sanctioned ? ['unban', 'keep'] : []
   if (!SPAM_KINDS.has(card.kind) || (FAILURE_KINDS.has(card.kind) && card.payload.messageId == null)) return []
   return spamActions(state)
 }
@@ -215,7 +221,7 @@ function decisions(card: CardRow): string[] {
 function topLines(card: CardRow, username: string | null, aboutMessage: boolean): string[] {
   const p = card.payload
   const category = aboutMessage ? [`Категория: ${p.category ? categoryTitle(p.category) : 'не определена'}`] : p.category ? [`Категория: ${categoryTitle(p.category)}`] : []
-  return [title(card), ...doneLine(card), ...member(p, username), ...category, ...confidence(p, aboutMessage)]
+  return [title(card), ...doneLine(card), ...member(p, username), ...(p.note ? [`Сейчас: ${p.note}`] : []), ...category, ...confidence(p, aboutMessage)]
 }
 
 interface QuoteBlock {
