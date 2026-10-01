@@ -46,12 +46,34 @@ interface Page {
   text: () => string
   waitFor: (selector: string) => Promise<Node_>
   click: (selector: string) => Promise<void>
+  /** What the page asked Telegram to vibrate, in order. */
+  haptics: string[]
 }
 
-async function open(initData: string): Promise<Page> {
-  const window = new Window({ url: `${base}/` })
-  const telegram = { WebApp: { initData, ready: () => {}, expand: () => {} } }
+/** Rewrites a JSON answer of the API before the page sees it: for fields the server of this branch does not give yet. */
+type Patch = (path: string, body: Record<string, unknown>) => Record<string, unknown>
+
+/** Motion is reduced by default, so no test depends on an animation; `motion: true` opens the page as a person without that setting. */
+async function open(initData: string, options: { patch?: Patch; motion?: boolean } = {}): Promise<Page> {
+  const { patch, motion = false } = options
+  const window = new Window({ url: `${base}/`, settings: { device: { prefersReducedMotion: motion ? 'no-preference' : 'reduce' } } })
+  const haptics: string[] = []
+  const HapticFeedback = {
+    impactOccurred: (style: string) => haptics.push(`impact:${style}`),
+    notificationOccurred: (type: string) => haptics.push(`notification:${type}`),
+    selectionChanged: () => haptics.push('selection'),
+  }
+  const telegram = { WebApp: { initData, ready: () => {}, expand: () => {}, HapticFeedback } }
   ;(window as unknown as { Telegram: unknown }).Telegram = telegram
+  if (patch) {
+    const real = window.fetch.bind(window)
+    ;(window as unknown as { fetch: unknown }).fetch = async (input: string, init?: object) => {
+      const response = await real(input, init)
+      if (!response.ok) return response
+      const body = patch(new URL(input, base).pathname, (await response.json()) as unknown as Record<string, unknown>)
+      return new window.Response(JSON.stringify(body), { status: response.status, headers: { 'content-type': 'application/json' } })
+    }
+  }
   window.document.body.innerHTML = '<nav id="nav"></nav><main id="app">Загрузка…</main>'
   window.eval(bundle)
   const $ = (selector: string) => window.document.querySelector(selector) as unknown as Node_ | null
@@ -68,7 +90,7 @@ async function open(initData: string): Promise<Page> {
     const element = await waitFor(selector)
     element.dispatchEvent(new window.Event('click', { bubbles: true }))
   }
-  return { window, $, $$, text: () => window.document.getElementById('app')!.textContent ?? '', waitFor, click }
+  return { window, $, $$, text: () => window.document.getElementById('app')!.textContent ?? '', waitFor, click, haptics }
 }
 
 const field = (page: Page, name: string): string => page.$(`[data-field="${name}"] b`)?.textContent ?? ''
@@ -127,6 +149,62 @@ describe('F16: Mini App in a browser environment, two chats with different fixtu
     expect(card.querySelector('[data-field=explanation]')?.textContent).toBe(loadJokes().explanations[1])
     expect(card.querySelector('img')?.getAttribute('src')).toBe('/ban-images/steam.webp')
     expect(page.window.document.body.textContent).not.toMatch(/Дмитрий|dmitry|Заработай/)
+  })
+
+  it('a member who writes as a channel is marked in the leaderboard and on the page; a missing field means no mark', async () => {
+    const channel = (path: string, body: Record<string, unknown>): Record<string, unknown> => {
+      if (path === '/api/leaderboard') return { ...body, rows: (body.rows as Array<Record<string, unknown>>).map((row) => (row.name === 'Carol' ? { ...row, is_channel: true } : row)) }
+      if (path.startsWith('/api/members/') && body.name === 'Carol') return { ...body, is_channel: true }
+      return body
+    }
+    const page = await open(VECTORS.bob_lb, { patch: channel })
+    await page.waitFor('[data-testid=leaderboard]')
+    expect(page.$$('button.row').map((row) => row.textContent)).toEqual(['1Alice5.00', '2Carolканал3.00'])
+    expect(page.$$('button.row [data-field=channel]').map((mark) => mark.textContent)).toEqual(['канал'])
+    expect(page.$('button.row [data-field=channel] img')?.getAttribute('src')).toBe('/img/megaphone.webp')
+    page.$$('button.row')[1].dispatchEvent(new page.window.Event('click', { bubbles: true }))
+    await page.waitFor('[data-field=karma]')
+    expect(page.$('.title h1')?.textContent).toBe('Carol')
+    expect(page.$('.title [data-field=channel]')?.textContent).toBe('канал')
+    const plain = await open(VECTORS.alice_me)
+    await plain.waitFor('[data-field=karma]')
+    expect(plain.$('[data-field=channel]')).toBeNull()
+  })
+
+  it('feel: each event reports its own vibration; motion classes only when motion is not reduced, the numbers stay true', async () => {
+    const page = await open(VECTORS.bob_lb, { motion: true })
+    await page.waitFor('[data-testid=leaderboard]')
+    expect(page.$('[data-testid=leaderboard]')?.getAttribute('class')).toContain('jcascade')
+    expect(page.$('#top .karma')?.textContent).toBe('+7.25')
+    await page.click('button[data-period=month]')
+    await page.waitFor('button.row.me')
+    expect(page.$('.tabs .pill')?.getAttribute('style')).toContain('--at: 1')
+    await page.click('button[data-screen=me]')
+    await page.waitFor('[data-field=karma]')
+    expect(page.$('[data-field=karma] b')?.textContent).toBe('7.25')
+    await page.click('button[data-action=hide]')
+    expect(page.haptics).toEqual(['selection', 'selection', 'impact:light'])
+    const still = await open(VECTORS.bob_lb)
+    await still.waitFor('[data-testid=leaderboard]')
+    expect(still.$('[data-testid=leaderboard]')?.getAttribute('class')).not.toContain('jcascade')
+    expect(still.$('#top .karma')?.getAttribute('class')).not.toContain('jcount')
+    for (let i = 0; i < 100 && (await h.db.query('SELECT hidden FROM members WHERE user_id = 2 AND chat_id = $1', [CHAT]))[0].hidden !== true; i++) await new Promise((r) => setTimeout(r, 20))
+    await h.db.query('UPDATE members SET hidden = false WHERE user_id = 2 AND chat_id = $1', [CHAT])
+  })
+
+  it('feel: a saved setting and a failed one feel different', async () => {
+    h.tg.members.set(99, 'administrator')
+    const page = await open(VECTORS.admin_admin)
+    await page.waitFor('[data-field=settings]')
+    await page.click('button[data-save=base_quote]')
+    for (let i = 0; i < 100 && !page.$('[data-save=base_quote] + span')?.textContent; i++) await new Promise((r) => setTimeout(r, 20))
+    expect(page.$('[data-save=base_quote] + span')?.textContent).toBe('Сохранено')
+    const area = page.$('#set-reactions_minus') as unknown as { value: string }
+    area.value = '[not json'
+    await page.click('button[data-save=reactions_minus]')
+    expect(page.haptics).toEqual(['impact:light', 'notification:success', 'impact:light', 'notification:error'])
+    h.tg.members.clear()
+    await h.db.query(`DELETE FROM chat_settings WHERE key = 'base_quote'`)
   })
 
   it('a bad signature shows an explanation instead of data', async () => {

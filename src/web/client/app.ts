@@ -1,3 +1,5 @@
+import { juice } from './juice.js'
+
 type Dict = Record<string, unknown>
 
 interface TelegramWebApp {
@@ -48,6 +50,7 @@ const ICONS: Record<string, string> = {
   admin: '................|...##...........|..####..........|################|..####..........|...##.......##..|...........####.|################|...........####.|.....##.....##..|....####........|################|....####........|.....##.........|................|................',
   open: '................|.........######.|.........######.|...........####.|..........#####.|.........###.##.|........###..##.|.......###......|.####.###.......|.##....#........|.##.............|.##.......##....|.##.......##....|.##########.....|.#########......|................',
   up: '................|.......##.......|......####......|.....######.....|....########....|...##########...|..############..|......####......|......####......|......####......|......####......|......####......|......####......|......####......|................|................',
+  flat: '................|................|................|................|................|................|..############..|..############..|..############..|..############..|................|................|................|................|................|................',
   down: '................|................|......####......|......####......|......####......|......####......|......####......|......####......|......####......|..############..|...##########...|....########....|.....######.....|......####......|.......##.......|................',
   reply: '................|................|.############...|##############..|##..........##..|##..##..##..##..|##..##..##..##..|##..........##..|##############..|.############...|...###..........|...##...........|...#............|................|................|................',
   next: '................|.....##.........|.....###........|......###.......|.......###......|........###.....|.........###....|.........###....|........###.....|.......###......|......###.......|.....###........|.....##.........|................|................|................',
@@ -83,7 +86,14 @@ function avatar(id: string, name: string, cls = 'ava'): HTMLElement {
 
 /** An empty state: the mascot and the plain explanation. */
 function empty(text: string, attrs: Record<string, string> = {}): HTMLElement {
-  return h('div', { class: 'empty' }, picture('/img/mascot.webp', 'mascot', 132), h('p', { class: 'hint', ...attrs }, text))
+  const mascot = picture('/img/mascot.webp', 'mascot', 132)
+  juice.emptyShown(mascot)
+  return h('div', { class: 'empty' }, mascot, h('p', { class: 'hint', ...attrs }, text))
+}
+
+/** The mark of a member who writes as a channel; the field may be missing, then it is not a channel. */
+function channelMark(item: Dict): Child {
+  return item.is_channel === true && h('span', { class: 'chan', 'data-field': 'channel' }, picture('/img/megaphone.webp', 'mega', 18), 'канал')
 }
 
 class ApiError extends Error {
@@ -112,7 +122,7 @@ type Screen = () => Promise<Child[]>
 let generation = 0
 
 /** Renders a screen; a slower earlier screen never overwrites a later one. */
-async function render(build: Screen): Promise<void> {
+async function render(build: Screen, shown?: () => void): Promise<void> {
   const mine = ++generation
   root.setAttribute('aria-busy', 'true')
   const slow = setTimeout(() => mine === generation && root.replaceChildren(skeleton()), 150)
@@ -126,6 +136,7 @@ async function render(build: Screen): Promise<void> {
   if (mine !== generation) return
   root.replaceChildren(...(nodes.filter(Boolean) as Node[]))
   root.removeAttribute('aria-busy')
+  shown?.()
 }
 
 function skeleton(): HTMLElement {
@@ -155,7 +166,9 @@ function failure(error: unknown): HTMLElement {
   const status = error instanceof ApiError ? error.status : 0
   const code = error instanceof ApiError ? s(error.body.error) : ''
   const known = [400, 403, 404].includes(status) ? REASONS[code] : undefined
-  return h('p', { class: 'error', role: 'alert' }, known ?? BY_STATUS[status] ?? 'Не удалось загрузить данные.')
+  const el = h('p', { class: 'error', role: 'alert' }, known ?? BY_STATUS[status] ?? 'Не удалось загрузить данные.')
+  juice.failed(el)
+  return el
 }
 
 // ---------------------------------------------------------------- leaderboard
@@ -164,24 +177,61 @@ const PERIODS: Array<[string, string]> = [['week', 'Неделя'], ['month', '�
 
 async function leaderboardScreen(period = 'week'): Promise<Child[]> {
   const data = await api(`/api/leaderboard?period=${period}`)
-  const tabs = h('div', { class: 'tabs', role: 'tablist' }, ...PERIODS.map(([key, label]) => {
+  return [h('h1', { class: 'titled' }, picture('/img/crown.webp', 'crown', 40), 'Лидерборд'), periodTabs(period), h('div', { class: 'slot' }, board(data))]
+}
+
+/** The period switch: the highlight moves at once, only the list below is loaded again. */
+function periodTabs(period: string): HTMLElement {
+  // the highlight carries its own dark copy of the labels, so the text under it is always readable, even mid-way
+  const pill = h('span', { class: 'pill', 'aria-hidden': 'true', style: `--at:${PERIODS.findIndex(([key]) => key === period)}` }, h('span', {}, ...PERIODS.map(([, label]) => h('span', {}, label))))
+  const buttons: HTMLElement[] = PERIODS.map(([key, label], index) => {
     const button = h('button', { 'data-period': key, 'aria-current': String(key === period) }, label)
-    button.addEventListener('click', () => void render(() => leaderboardScreen(key)))
+    button.addEventListener('click', () => {
+      for (const other of buttons) other.setAttribute('aria-current', String(other === button))
+      juice.periodChanged(pill, index)
+      void showPeriod(key)
+    })
     return button
-  }))
+  })
+  return h('div', { class: 'tabs', role: 'tablist' }, pill, ...buttons)
+}
+
+async function showPeriod(period: string): Promise<void> {
+  const slot = root.querySelector('.slot')
+  if (!slot) return render(() => leaderboardScreen(period))
+  const mine = ++generation
+  slot.setAttribute('aria-busy', 'true')
+  let node: HTMLElement
+  try {
+    node = board(await api(`/api/leaderboard?period=${period}`))
+  } catch (error) {
+    node = failure(error)
+  }
+  if (mine !== generation) return
+  slot.replaceChildren(node)
+  slot.removeAttribute('aria-busy')
+}
+
+function board(data: Dict): HTMLElement {
   const rows = list(data.rows).map((row) => {
-    const button = h('button', { class: `row${row.is_me ? ' me' : ''}`, 'data-public-id': s(row.public_id) }, place(n(row.place)), avatar(s(row.public_id), s(row.name)), h('span', { class: 'name' }, s(row.name)), h('span', { class: 'num' }, fmt(row.karma)))
-    button.addEventListener('click', () => void render(() => pageScreen(s(row.public_id))))
+    const who = h('span', { class: 'who' }, h('span', { class: 'name' }, s(row.name)), channelMark(row))
+    const button = h('button', { class: `row${row.is_me ? ' me' : ''}`, 'data-public-id': s(row.public_id) }, place(n(row.place)), avatar(s(row.public_id), s(row.name)), who, h('span', { class: 'num' }, fmt(row.karma)))
+    button.addEventListener('click', () => {
+      juice.pageOpened()
+      void render(() => pageScreen(s(row.public_id)), () => juice.pageShown(root))
+    })
     return h('li', {}, button)
   })
-  const board = rows.length ? h('ol', { class: 'board', 'data-testid': 'leaderboard' }, ...rows) : empty('За этот период пока никого нет.')
-  return [h('h1', {}, 'Лидерборд'), tabs, board]
+  if (!rows.length) return empty('За этот период пока никого нет.')
+  const ol = h('ol', { class: 'board', 'data-testid': 'leaderboard' }, ...rows)
+  juice.listShown(ol)
+  return ol
 }
 
 /** The first three places get a medal; the number stays for screen readers. */
 function place(at: number): HTMLElement {
   if (at < 1 || at > 3) return h('span', { class: 'place' }, String(at))
-  return h('span', { class: 'place' }, picture(`/img/medal-${at}.webp`, 'medal', 52), h('span', { class: 'sr-only' }, String(at)))
+  return h('span', { class: 'place' }, picture(`/img/medal-${at}.webp`, 'medal', 48), h('span', { class: 'sr-only' }, String(at)))
 }
 
 // ---------------------------------------------------------------- personal page
@@ -202,14 +252,17 @@ function chartSvg(points: Dict[]): HTMLElement | null {
   return h('div', { class: 'card chartbox' }, t.content.firstChild)
 }
 
-function stat(field: string, label: string, value: string, marker: Child = null): HTMLElement {
-  return h('div', { class: 'stat', 'data-field': field }, h('b', {}, marker, value), h('span', {}, label))
+function stat(field: string, label: string, value: string, mark: Child): HTMLElement {
+  return h('div', { class: 'stat', 'data-field': field }, mark, h('b', {}, value), h('span', {}, label))
 }
 
-/** A pixel arrow beside the weekly change: up for a gain, down for a loss. */
-function trend(delta: number): Child {
-  if (delta === 0) return null
-  return h('i', { class: delta > 0 ? 'rise' : 'fall' }, icon(delta > 0 ? 'up' : 'down'))
+/** A voxel picture in the corner of a tile. */
+const badge = (name: string): HTMLElement => picture(`/img/${name}.webp`, 'ico', 36)
+
+/** The weekly change gets a pixel arrow: up for a gain, down for a loss, a bar for none. */
+function trend(delta: number): HTMLElement {
+  const [cls, name] = delta > 0 ? ['rise', 'up'] : delta < 0 ? ['fall', 'down'] : ['flat', 'flat']
+  return h('i', { class: `ico ${cls}` }, icon(name))
 }
 
 function messageCard(m: Dict): HTMLElement {
@@ -224,14 +277,16 @@ function messageBlock(title: string, field: string, items: Dict[]): HTMLElement 
 }
 
 function statsGrid(page: Dict): HTMLElement {
+  const karma = stat('karma', 'Карма', fmt(page.karma), badge('star'))
+  juice.numberShown(karma.querySelector('b') as HTMLElement, n(page.karma), fmt)
   return h('div', { class: 'grid' },
-    stat('karma', 'Карма', fmt(page.karma)),
-    stat('place', 'Место', s(page.place) || '-'),
+    karma,
+    stat('place', 'Место', s(page.place) || '-', badge('trophy')),
     stat('week_delta', 'За неделю', fmt(page.week_delta), trend(n(page.week_delta))),
-    stat('thanks_count', 'Благодарности', s(page.thanks_count)),
-    stat('answers_count', 'Ответы на вопросы', s(page.answers_count)),
-    stat('caught_spammers_count', 'Пойманные спамеры', s(page.caught_spammers_count)),
-    stat('streak_weeks', 'Серия недель', s(page.streak_weeks)),
+    stat('thanks_count', 'Благодарности', s(page.thanks_count), badge('heart')),
+    stat('answers_count', 'Ответы на вопросы', s(page.answers_count), badge('bubble')),
+    stat('caught_spammers_count', 'Пойманные спамеры', s(page.caught_spammers_count), badge('shield')),
+    stat('streak_weeks', 'Серия недель', s(page.streak_weeks), badge('flame')),
   )
 }
 
@@ -249,7 +304,7 @@ function hideButton(page: Dict): HTMLElement {
 function pageView(page: Dict, self: boolean): Child[] {
   const messages = dict(page.messages)
   return [
-    h('h1', {}, s(page.name) || 'Моя страница'),
+    h('div', { class: 'title' }, h('h1', {}, s(page.name) || 'Моя страница'), channelMark(page)),
     page.empty ? empty('Здесь появятся ваши цифры, когда вы напишете в чате и получите первые оценки.') : null,
     decayNote(dict(page.decay_warning)),
     statsGrid(page),
@@ -298,6 +353,14 @@ const APPEAL_TEXT: Record<string, string> = {
   try_later: 'Не получилось, попробуйте позже.',
 }
 
+/** Each answer to the appeal feels different; only a lifted ban is celebrated. */
+function appealFeel(status: string, lifted: boolean, button: HTMLElement, result: HTMLElement): void {
+  if (status === 'accepted') return lifted ? juice.appealLifted(button, result) : juice.appealAccepted(result)
+  if (status === 'rejected' || status === 'not_allowed') return juice.appealRefused(result)
+  if (status === 'try_later') return juice.failed(result)
+  juice.appealWaiting(result)
+}
+
 async function appealScreen(): Promise<Child[]> {
   const state = await api('/api/appeal')
   const result = h('p', { 'data-field': 'appeal_result', role: 'status' })
@@ -315,9 +378,11 @@ async function appealScreen(): Promise<Child[]> {
       .then((r) => {
         const status = s(r.status)
         result.textContent = status === 'accepted' ? (r.lifted ? 'Готово, ограничение снято. Первые сообщения проверяются строже.' : 'Принято. Снятие ограничения не прошло, нажмите ещё раз позже.') : (APPEAL_TEXT[status] ?? 'Готово.')
+        appealFeel(status, r.lifted === true, send, result)
       })
       .catch((error: unknown) => {
         result.textContent = error instanceof ApiError && error.status === 422 ? 'Напишите от 1 до 500 знаков.' : 'Не получилось, попробуйте позже.'
+        juice.failed(result)
       })
   })
   const blocked = state.status !== 'none' || state.allowed === false
@@ -369,9 +434,11 @@ function settingRow(spec: Dict, values: Dict, versions: Dict): HTMLElement[] {
   const done = (version: unknown): void => {
     versions[name] = version
     status.textContent = 'Сохранено'
+    juice.saved(status)
   }
   const failed = (error: unknown): void => {
     status.textContent = describeError(error)
+    juice.failed(status)
   }
   save.addEventListener('click', () => {
     let body: { value: unknown; base_version: number }
@@ -410,22 +477,43 @@ function cardView(c: Dict): HTMLElement {
 async function adminScreen(): Promise<Child[]> {
   await api('/api/admin/whoami')
   const [audit, ops, cards, imp, obs, held] = await Promise.all([api('/api/admin/audit'), api('/api/admin/operations'), api('/api/admin/cards'), api('/api/admin/import'), api('/api/admin/observation'), api('/api/admin/held')])
-  const file = h('input', { type: 'file', accept: 'application/json', 'aria-label': 'Файл экспорта Telegram Desktop' })
+  const file = h('input', { type: 'file', accept: 'application/json', 'aria-label': 'Файл экспорта Telegram Desktop', class: 'sr-only' }) as HTMLInputElement
+  const chosenName = h('span', { class: 'hint' }, 'Файл не выбран')
+  file.addEventListener('change', () => (chosenName.textContent = file.files?.[0]?.name ?? 'Файл не выбран'))
+  const picker = h('label', { class: 'file' }, file, h('span', { class: 'btn' }, 'Выбрать файл'), chosenName)
   const importStatus = h('p', { role: 'status', 'data-field': 'import_status' }, dict(imp.job).status ? `Импорт: ${s(dict(imp.job).status)} ${s(dict(imp.job).processed)}/${s(dict(imp.job).total)}` : '')
   const upload = h('button', { class: 'primary', 'data-action': 'import' }, 'Загрузить файл')
   upload.addEventListener('click', () => {
-    const chosen = (file as HTMLInputElement).files?.[0]
+    const chosen = file.files?.[0]
     if (!chosen) return
-    void api('/api/admin/import', { method: 'POST', body: chosen }).then(() => (importStatus.textContent = 'Файл принят, идёт подсчёт.')).catch((e: unknown) => (importStatus.textContent = `Не принят: ${e instanceof ApiError ? s(e.body.error) : 'ошибка'}`))
+    void api('/api/admin/import', { method: 'POST', body: chosen })
+      .then(() => {
+        importStatus.textContent = 'Файл принят, идёт подсчёт.'
+        juice.saved(importStatus)
+      })
+      .catch((e: unknown) => {
+        importStatus.textContent = `Не принят: ${e instanceof ApiError ? s(e.body.error) : 'ошибка'}`
+        juice.failed(importStatus)
+      })
   })
   const until = h('input', { type: 'text', placeholder: '2026-10-15T12:00:00Z', 'aria-label': 'Продлить наблюдение до' })
   const extend = h('button', { 'data-action': 'observation' }, 'Продлить наблюдение')
   const obsStatus = h('p', { role: 'status', 'data-field': 'observation' }, `Наблюдение до ${s(obs.ends_at)}`)
-  extend.addEventListener('click', () => void api('/api/admin/observation', { method: 'POST', body: JSON.stringify({ until: (until as HTMLInputElement).value }) }).then(() => (obsStatus.textContent = 'Продлено')).catch(() => (obsStatus.textContent = 'Не удалось продлить')))
+  extend.addEventListener('click', () =>
+    void api('/api/admin/observation', { method: 'POST', body: JSON.stringify({ until: (until as HTMLInputElement).value }) })
+      .then(() => {
+        obsStatus.textContent = 'Продлено'
+        juice.saved(obsStatus)
+      })
+      .catch(() => {
+        obsStatus.textContent = 'Не удалось продлить'
+        juice.failed(obsStatus)
+      }),
+  )
   return [
     h('h1', {}, 'Экран админа'),
     h('section', { class: 'card' }, obsStatus, h('div', { class: 'row2' }, until, extend)),
-    h('section', { class: 'card' }, h('h2', {}, 'Импорт истории'), h('p', { class: 'hint' }, 'Файл берётся на доверии: совпадение номера чата защищает от ошибки, но не доказывает, что файл настоящий. Берётся окно из настройки import_days (по умолчанию 90 суток), только плюсы.'), file, upload, importStatus),
+    h('section', { class: 'card' }, h('h2', {}, 'Импорт истории'), h('p', { class: 'hint' }, 'Файл берётся на доверии: совпадение номера чата защищает от ошибки, но не доказывает, что файл настоящий. Берётся окно из настройки import_days (по умолчанию 90 суток), только плюсы.'), picker, upload, importStatus),
     h('section', { class: 'card list', 'data-field': 'operations' }, h('h2', {}, 'Операции с проблемами'), ...list(ops.operations).map((o) => h('p', {}, `${s(o.operation_kind)}: ${s(o.status)} ${s(o.last_error_code)}`))),
     h('section', { class: 'card list', 'data-field': 'held' }, h('h2', {}, 'Убранные сообщения (до 30 суток)'), ...list(held.held).map((m) => h('p', {}, `${s(m.author_name)} (${s(m.reason)}): ${s(m.text)}`))),
     h('section', { class: 'card', 'data-field': 'cards' }, h('h2', {}, 'Карточки'), ...list(cards.cards).map(cardView)),
@@ -463,6 +551,7 @@ function showTabs(viewer: Dict): string[] {
     const button = h('button', { 'data-screen': key }, icon(key), h('span', {}, label))
     button.addEventListener('click', () => {
       navigated = true
+      juice.tabChanged()
       open(key)
     })
     return button
@@ -474,11 +563,9 @@ function showTabs(viewer: Dict): string[] {
 function showHeader(context: Dict): void {
   const viewer = dict(context.viewer)
   const name = s(viewer.name)
-  topBar.replaceChildren(
-    avatar(s(viewer.public_id) || name, name, 'ava big'),
-    h('div', { class: 'who' }, h('b', {}, name), h('span', {}, s(dict(context.chat).title))),
-    h('span', { class: 'karma', 'aria-label': `Карма ${signed(viewer.karma)}` }, signed(viewer.karma)),
-  )
+  const karma = h('span', { class: 'karma', 'aria-label': `Карма ${signed(viewer.karma)}` }, signed(viewer.karma))
+  juice.numberShown(karma, n(viewer.karma), signed)
+  topBar.replaceChildren(avatar(s(viewer.public_id) || name, name, 'ava big'), h('div', { class: 'who' }, h('b', {}, name), h('span', {}, s(dict(context.chat).title))), karma)
   topBar.removeAttribute('hidden')
 }
 
@@ -501,6 +588,7 @@ function paintTelegram(): void {
 }
 
 function boot(): void {
+  juice.install()
   webApp?.ready?.()
   webApp?.expand?.()
   paintTelegram()
