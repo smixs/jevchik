@@ -1,0 +1,11 @@
+.env
+.git
+.scratch
+node_modules
+dist
+coverage
+data
+research
+tests
+docs
+*.log

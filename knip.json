@@ -1,0 +1,5 @@
+{
+  "entry": ["src/main.ts", "src/web/client/app.ts", "scripts/*.mjs", "tests/**/*.test.ts", "vitest.config.ts", "eslint.config.js"],
+  "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs"],
+  "ignoreDependencies": ["@vitest/coverage-v8", "tsx"]
+}

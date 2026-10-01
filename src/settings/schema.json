@@ -1,0 +1,507 @@
+{
+  "version": 1,
+  "keys": [
+    {
+      "name": "reactions_minus",
+      "type": "string_array",
+      "default": [
+        "👎"
+      ],
+      "nullable": false,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "maxItems": 50
+    },
+    {
+      "name": "reactions_ignore",
+      "type": "string_array",
+      "default": [
+        "💩",
+        "🤮",
+        "🤡"
+      ],
+      "nullable": false,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "maxItems": 50
+    },
+    {
+      "name": "base_reaction",
+      "type": "number",
+      "default": 1,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "base_reply",
+      "type": "number",
+      "default": 2,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "base_quote",
+      "type": "number",
+      "default": 3,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "base_dialog",
+      "type": "number",
+      "default": 4,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "base_thanks",
+      "type": "number",
+      "default": 6,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "base_minus",
+      "type": "number",
+      "default": -1,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "report_author_delta",
+      "type": "number",
+      "default": -20,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "report_reporter_delta",
+      "type": "number",
+      "default": 5,
+      "nullable": false,
+      "minimum": -100,
+      "maximum": 100
+    },
+    {
+      "name": "usefulness_points",
+      "type": "number_array",
+      "default": [
+        0,
+        0,
+        0.1,
+        0.25,
+        0.5
+      ],
+      "nullable": false,
+      "items": {
+        "type": "number",
+        "minimum": -100,
+        "maximum": 100
+      },
+      "length": 5
+    },
+    {
+      "name": "voter_scale",
+      "type": "number",
+      "default": 100,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 100000
+    },
+    {
+      "name": "minus_daily_limit",
+      "type": "integer",
+      "default": 5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "minus_min_karma",
+      "type": "number",
+      "default": 1,
+      "nullable": false,
+      "minimum": -100000,
+      "maximum": 100000
+    },
+    {
+      "name": "karma_lower_bound",
+      "type": "number",
+      "default": -50,
+      "nullable": false,
+      "minimum": -1000,
+      "maximum": 0
+    },
+    {
+      "name": "silence_days",
+      "type": "integer",
+      "default": 14,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 366
+    },
+    {
+      "name": "decay_period_days",
+      "type": "integer",
+      "default": 30,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 366
+    },
+    {
+      "name": "decay_rate",
+      "type": "number",
+      "default": 0.1,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "streak_bonus_per_week",
+      "type": "number",
+      "default": 0.05,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "streak_bonus_max",
+      "type": "number",
+      "default": 0.25,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 5
+    },
+    {
+      "name": "threshold_is_thanks",
+      "type": "number",
+      "default": 0.5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "threshold_is_answer",
+      "type": "number",
+      "default": 0.5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "threshold_is_question",
+      "type": "number",
+      "default": 0.5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "threshold_is_flood",
+      "type": "number",
+      "default": 0.5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "threshold_media_fits",
+      "type": "number",
+      "default": 0.5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "threshold_rude",
+      "type": "number",
+      "default": 0.8,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "previous_messages_count",
+      "type": "integer",
+      "default": 8,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 20
+    },
+    {
+      "name": "react_min_level",
+      "type": "integer",
+      "default": 4,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 4
+    },
+    {
+      "name": "react_min_confidence",
+      "type": "number",
+      "default": 0.7,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "bot_reaction_emoji",
+      "type": "string",
+      "default": "🔥",
+      "nullable": false,
+      "minLength": 1,
+      "maxLength": 64
+    },
+    {
+      "name": "spam_auto_threshold",
+      "type": "number",
+      "default": 0.9,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "profile_auto_threshold",
+      "type": "number",
+      "default": 0.8,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "spam_review_delete_threshold",
+      "type": "number",
+      "default": 0.5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "spam_review_threshold",
+      "type": "number",
+      "default": 0.3,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "protect_threshold",
+      "type": "number",
+      "default": 100,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    {
+      "name": "spam_newcomer_messages",
+      "type": "integer",
+      "default": 5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "steam_hours",
+      "type": "integer",
+      "default": 24,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 8784
+    },
+    {
+      "name": "probation_messages",
+      "type": "integer",
+      "default": 5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "probation_review_delete_threshold",
+      "type": "number",
+      "default": 0.3,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "appeal_accept",
+      "type": "number",
+      "default": 0.7,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "appeal_reject",
+      "type": "number",
+      "default": 0.3,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "punish_media_karma",
+      "type": "number",
+      "default": -10,
+      "nullable": false,
+      "minimum": -1000,
+      "maximum": 0
+    },
+    {
+      "name": "punish_mute_day_karma",
+      "type": "number",
+      "default": -25,
+      "nullable": false,
+      "minimum": -1000,
+      "maximum": 0
+    },
+    {
+      "name": "punish_mute_week_karma",
+      "type": "number",
+      "default": -40,
+      "nullable": false,
+      "minimum": -1000,
+      "maximum": 0
+    },
+    {
+      "name": "mute_day_hours",
+      "type": "integer",
+      "default": 24,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 8784
+    },
+    {
+      "name": "mute_week_hours",
+      "type": "integer",
+      "default": 168,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 8784
+    },
+    {
+      "name": "report_daily_limit",
+      "type": "integer",
+      "default": 10,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 1000
+    },
+    {
+      "name": "dialog_window_hours",
+      "type": "integer",
+      "default": 24,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 8784
+    },
+    {
+      "name": "timezone",
+      "type": "timezone",
+      "default": "Asia/Tashkent",
+      "nullable": false
+    },
+    {
+      "name": "observation_until",
+      "type": "timestamp",
+      "default": null,
+      "nullable": true
+    },
+    {
+      "name": "digest_enabled",
+      "type": "boolean",
+      "default": true,
+      "nullable": false
+    },
+    {
+      "name": "digest_hour",
+      "type": "integer",
+      "default": 10,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 23
+    },
+    {
+      "name": "excerpt_days",
+      "type": "integer",
+      "default": 7,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 366
+    },
+    {
+      "name": "best_messages_limit",
+      "type": "integer",
+      "default": 10,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "held_text_days",
+      "type": "integer",
+      "default": 30,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 30
+    },
+    {
+      "name": "import_days",
+      "type": "integer",
+      "default": 90,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 366
+    },
+    {
+      "name": "karma_tag_enabled",
+      "type": "boolean",
+      "default": true,
+      "nullable": false
+    },
+    {
+      "name": "karma_tag_template",
+      "type": "string",
+      "default": "{n}",
+      "nullable": false,
+      "minLength": 3,
+      "maxLength": 12,
+      "format": "karma_tag"
+    },
+    {
+      "name": "karma_tag_min_interval_minutes",
+      "type": "integer",
+      "default": 10,
+      "nullable": false,
+      "minimum": 1,
+      "maximum": 527040
+    },
+    {
+      "name": "questions",
+      "type": "questions",
+      "default": "@eval/questions.json",
+      "nullable": false
+    }
+  ],
+  "invariants": [
+    "spam_review_threshold <= spam_review_delete_threshold",
+    "spam_review_delete_threshold <= spam_auto_threshold",
+    "appeal_reject <= appeal_accept",
+    "punish_mute_week_karma <= punish_mute_day_karma",
+    "punish_mute_day_karma <= punish_media_karma"
+  ]
+}

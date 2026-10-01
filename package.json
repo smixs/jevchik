@@ -1,0 +1,40 @@
+{
+  "name": "jevchik",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/build-web.mjs",
+    "start:bot": "node dist/main.js bot",
+    "start:web": "node dist/main.js web",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests scripts",
+    "test": "npm run build && vitest run",
+    "test:coverage": "npm run build && vitest run --coverage && node scripts/copy-lcov.mjs",
+    "budget": "node scripts/check-budget.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "grammy": "^1.46.0",
+    "hono": "^4.13.10",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^5.0.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.11.0",
+    "fast-check": "^4.10.2",
+    "happy-dom": "^20.14.5",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.2",
+    "yaml": "^2.9.1"
+  }
+}
