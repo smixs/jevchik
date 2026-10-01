@@ -13,6 +13,9 @@ Telegram-бот для групповых чатов: карма за польз
 - **Разбан через Mini App.** Под репликой кнопка «Я не спамер»: человек пишет короткое объяснение, Jev его оценивает. Попытка одна.
 - **Команды.** `/spam` - админ отвечает этой командой на сообщение, бот удаляет его и отправляет автора в парилку. `/report` - любой участник жалуется на сообщение, админы получают карточку.
 - **Карточки админам.** В личные сообщения: цитата, ссылка на сообщение, категория, уверенность и кнопки «Спам», «Не спам», «Не спам, вернуть», «Забанить». После нажатия бот пишет итог и правит карточку у всех админов.
+- **Модерация из Mini App.** Любой админ чата на странице участника отправляет его в парилку на час, сутки или неделю, банит или разбанивает; в бане видит настоящие имена и снимает наказание одной кнопкой. Наказанный может один раз попросить разбан, админы получают карточку «Разбанить» / «Оставить».
+- **Каналы.** Канал, который пишет в чате, получает карму и стоит в лидерборде с пометкой «канал».
+- **Боты.** Ботов в лидерборде нет. Галочка «Боты в рейтинге» на экране админа возвращает их в лидерборд и ставит им тег с кармой.
 - **Наказания за низкую карму.** Запрет ссылок и медиа, мьют на сутки, мьют на неделю.
 - **Недельная сводка** в чате: лидеры недели, лучший ответ, число отправленных в баню.
 - **Импорт истории.** Загрузка экспорта чата из Telegram Desktop даёт участникам стартовую карму за последние 90 суток.
@@ -125,7 +128,8 @@ Jev отвечает на четыре вопроса: зовёт ли сооб�
 
 - Карточки в личных сообщениях: что сделал бот, участник, категория, уверенность в процентах, цитата сообщения, ссылка и кнопки решения. Карточки приходят и по жалобам `/report`, и при сбоях (например, если у бота нет прав).
 - После нажатия кнопки - всплывающий ответ с итогом и строка «Решение: ...» с именем админа и временем в карточке у всех админов.
-- Экран админа в Mini App (вкладка «Админ» видна только админам чата): настройки, журнал изменений настроек, загрузка истории, продление режима наблюдения, операции с ошибками, убранные сообщения за последние 30 суток, все карточки.
+- Кнопки модерации на странице участника: «В парилку» (1 час, сутки, неделя), «Забанить» (со вторым нажатием для подтверждения), «Выпустить из парилки» / «Разбанить». Карма при этом не меняется; парилка от админа кончается сама и в бан не превращается; забаненного нет в лидерборде, пока бан не снят. В чат уходит реплика бота с кнопкой «Попросить разбан»; при снятии наказания реплика удаляется. Каждое действие попадает в журнал наказаний.
+- Экран админа в Mini App (вкладка «Админ» видна только админам чата): галочка «Боты в рейтинге», поиск участника по имени или @username, журнал наказаний, настройки, журнал изменений настроек, загрузка истории, продление режима наблюдения, операции с ошибками, убранные сообщения за последние 30 суток, все карточки.
 
 ### Режим наблюдения
 
@@ -184,6 +188,7 @@ Mini App открывается кнопкой под репликой о спа
 | `observation_until` | пусто | до какого момента продлён режим наблюдения |
 | `import_days` | 90 | окно импорта истории в сутках |
 | `karma_tag_enabled`, `karma_tag_template`, `karma_tag_min_interval_minutes` | true, `{n}`, 10 | тег с кармой: включён ли, шаблон (`{n}` - карма со знаком, без эмодзи) и как часто обновляется |
+| `bots_in_rating` | false | боты в лидерборде и с тегом кармы (галочка «Боты в рейтинге» на экране админа) |
 | `held_text_days` | 30 | сколько суток админам доступен текст убранных сообщений (не больше 30) |
 | `previous_messages_count` | 8 | сколько предыдущих реплик видит Jev |
 | `questions` | из `eval/questions.json` | вопросы к Jev |
@@ -245,6 +250,9 @@ The bot's own texts (cards, replies, Mini App) are in Russian.
 - **Unban through the Mini App.** The joke reply has a button «Я не спамер» ("I am not a spammer"): the person writes a short explanation and Jev judges it. One attempt.
 - **Commands.** `/spam` - an admin replies to a message with it; the bot deletes the message and sends its author to the steam room. `/report` - any member reports a message; admins get a card.
 - **Admin cards.** In private messages: a quote, a link to the message, the category, the confidence and the buttons «Спам», «Не спам», «Не спам, вернуть», «Забанить» (spam, not spam, not spam and restore, ban). After a press the bot reports the result and edits the card for every admin.
+- **Moderation from the Mini App.** Any chat admin can, on a member's page, send them to the steam room for an hour, a day or a week, ban or unban them; in the bathhouse an admin sees real names and lifts a sanction with one button. A sanctioned member may ask for an unban once; admins get a card with «Разбанить» / «Оставить» (unban / keep).
+- **Channels.** A channel that writes in the chat earns karma and stands in the leaderboard with a «канал» (channel) mark.
+- **Bots.** Bots are not in the leaderboard. The «Боты в рейтинге» (bots in the rating) checkbox on the admin screen puts them back and gives them the karma tag.
 - **Low-karma punishments.** No links and media, a one-day mute, a one-week mute.
 - **Weekly digest** in the chat: leaders of the week, the best answer, how many were sent to the bathhouse.
 - **History import.** Uploading a chat export from Telegram Desktop gives members starting karma for the last 90 days.
@@ -357,7 +365,8 @@ With a confidence from 30% to 90% the message stays and admins get the card «П
 
 - Cards in private messages: what the bot did, the member, the category, the confidence in percent, a quote of the message, a link and decision buttons. Cards also come for `/report` and for failures (for example, when the bot lacks rights).
 - After a button press: a popup with the result and a line «Решение: ...» with the admin's name and the time, on the card of every admin.
-- The admin screen in the Mini App (the «Админ» tab is visible to chat admins only): settings, the settings change log, history upload, extending observation mode, failed operations, removed messages of the last 30 days, all cards.
+- Moderation buttons on a member's page: «В парилку» (1 hour, a day, a week), «Забанить» (a second press confirms), «Выпустить из парилки» / «Разбанить». Karma is not changed; a steam room given by an admin ends by itself and never turns into a ban; a banned member is not in the leaderboard until unbanned. The bot posts a joke reply with a «Попросить разбан» (ask for an unban) button; when the sanction is lifted the reply is deleted. Every action goes to the sanctions journal.
+- The admin screen in the Mini App (the «Админ» tab is visible to chat admins only): the «Боты в рейтинге» checkbox, member search by name or @username, the sanctions journal, settings, the settings change log, history upload, extending observation mode, failed operations, removed messages of the last 30 days, all cards.
 
 ### Observation mode
 
@@ -416,6 +425,7 @@ Main keys:
 | `observation_until` | empty | until when observation mode is extended |
 | `import_days` | 90 | history import window in days |
 | `karma_tag_enabled`, `karma_tag_template`, `karma_tag_min_interval_minutes` | true, `{n}`, 10 | karma tag: on or off, template (`{n}` is signed karma, no emoji) and how often it is updated |
+| `bots_in_rating` | false | bots in the leaderboard and with the karma tag (the «Боты в рейтинге» checkbox on the admin screen) |
 | `held_text_days` | 30 | for how many days admins can read removed messages (at most 30) |
 | `previous_messages_count` | 8 | how many previous messages Jev sees |
 | `questions` | from `eval/questions.json` | the questions for Jev |
