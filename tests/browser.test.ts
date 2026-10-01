@@ -77,14 +77,14 @@ describe('F16: Mini App in a browser environment, two chats with different fixtu
   it('the leaderboard: week by default, then month and all time; a tap opens the personal page', async () => {
     const page = await open(VECTORS.bob_lb)
     await page.waitFor('[data-testid=leaderboard]')
-    expect(page.$$('tr.row').map((row) => row.textContent)).toEqual(['1Alice5.00', '2Carol3.00'])
+    expect(page.$$('button.row').map((row) => row.textContent)).toEqual(['1Alice5.00', '2Carol3.00'])
     await page.click('button[data-period=month]')
-    await page.waitFor('tr.row.me')
-    expect(page.$$('tr.row').map((row) => row.textContent)).toEqual(['1Alice12.50', '2Bob7.25', '3Carol3.00'])
+    await page.waitFor('button.row.me')
+    expect(page.$$('button.row').map((row) => row.textContent)).toEqual(['1Alice12.50', '2Bob7.25', '3Carol3.00'])
     expect(page.$('button[data-period=month]')?.getAttribute('aria-current')).toBe('true')
     await page.click('button[data-period=all]')
-    await page.waitFor('tr.row.me')
-    const alice = page.$$('tr.row')[0]
+    await page.waitFor('button.row.me')
+    const alice = page.$$('button.row')[0]
     alice.dispatchEvent(new page.window.Event('click', { bubbles: true }))
     await page.waitFor('[data-field=karma]')
     expect(field(page, 'karma')).toBe('12.50')
@@ -95,7 +95,9 @@ describe('F16: Mini App in a browser environment, two chats with different fixtu
     expect(field(page, 'caught_spammers_count')).toBe('0')
     expect(field(page, 'streak_weeks')).toBe('2')
     expect(page.$('[data-field=decay_warning]')?.textContent).toContain('Карма начнёт убывать')
-    expect(page.$$('[data-field=messages_latest] li').map((li) => li.textContent)).toEqual(['Просто мнение ↗', 'Ссылка на документацию ↗', 'Разбор: как настроить агента на Jev ↗'])
+    expect(page.$$('[data-field=messages_latest] li .excerpt').map((p) => p.textContent)).toEqual(['Просто мнение', 'Ссылка на документацию', 'Разбор: как настроить агента на Jev'])
+    expect(page.$$('[data-field=messages_latest] li .meta span').map((span) => span.textContent)).toEqual(['0.00', '0', '+1.00', '7', '+5.00', '2'])
+    expect(page.$$('[data-field=messages_latest] li a').map((a) => a.textContent)).toEqual(['Открыть в чате', 'Открыть в чате', 'Открыть в чате'])
     expect(page.$('[data-field=messages_latest] a')?.getAttribute('href')).toBe('https://t.me/c/1234567890/503')
     expect(page.$$('[data-field=messages_top_upvoted] li')[0].textContent).toContain('Разбор')
     expect(page.$$('[data-field=messages_most_replied] li')[0].textContent).toContain('Ссылка на документацию')
@@ -111,8 +113,8 @@ describe('F16: Mini App in a browser environment, two chats with different fixtu
     await page.click('button[data-screen=lb]')
     await page.waitFor('[data-testid=leaderboard]')
     await page.click('button[data-period=all]')
-    await page.waitFor('tr.row.me')
-    expect(page.$$('tr.row').map((row) => row.textContent)).toEqual(['1Alice99.00', '2Erin40.00'])
+    await page.waitFor('button.row.me')
+    expect(page.$$('button.row').map((row) => row.textContent)).toEqual(['1Alice99.00', '2Erin40.00'])
   })
 
   it('the ban screen shows a masked name, the category, a joke and a picture, and no personal data', async () => {
@@ -123,7 +125,7 @@ describe('F16: Mini App in a browser environment, two chats with different fixtu
     expect(card.querySelector('h2')?.textContent).toBe('Д***')
     expect(card.querySelector('[data-field=category]')?.textContent).toBe('Поддакнул и достал рекламу')
     expect(card.querySelector('[data-field=explanation]')?.textContent).toBe(loadJokes().explanations[1])
-    expect(card.querySelector('img')?.getAttribute('src')).toBe('/ban-images/towel.svg')
+    expect(card.querySelector('img')?.getAttribute('src')).toBe('/ban-images/steam.webp')
     expect(page.window.document.body.textContent).not.toMatch(/Дмитрий|dmitry|Заработай/)
   })
 
@@ -248,7 +250,7 @@ describe('section 3.8: the Mini App opened without start_param (the "Open App" b
   it('one chat: its leaderboard at once, no error', async () => {
     const page = await open(VECTORS.no_ctx)
     await page.waitFor('[data-testid=leaderboard]')
-    expect(page.$$('tr.row').map((row) => row.textContent)).toEqual(['1Alice5.00', '2Carol3.00'])
+    expect(page.$$('button.row').map((row) => row.textContent)).toEqual(['1Alice5.00', '2Carol3.00'])
     expect(page.$('p.error')).toBeNull()
   })
 
@@ -259,8 +261,8 @@ describe('section 3.8: the Mini App opened without start_param (the "Open App" b
     await page.click(`[data-field=chats] button[data-chat-id="${-1009876543210}"]`)
     await page.waitFor('[data-testid=leaderboard]')
     await page.click('button[data-period=all]')
-    await page.waitFor('tr.row.me')
-    expect(page.$$('tr.row').map((row) => row.textContent)).toEqual(['1Alice99.00', '2Erin40.00'])
+    await page.waitFor('button.row.me')
+    expect(page.$$('button.row').map((row) => row.textContent)).toEqual(['1Alice99.00', '2Erin40.00'])
   })
 
   it('no chat: a plain explanation instead of an error', async () => {

@@ -28,7 +28,7 @@ export async function runWeb(config: Config): Promise<{ close(): Promise<void> }
   const app = createWebApp(ctx, {
     botToken: config.botToken,
     publicDir: config.publicDir ?? fileURLToPath(new URL('./public', import.meta.url)),
-    imagesDir: fileURLToPath(new URL('../data-static/ban', import.meta.url)),
+    imagesDir: fileURLToPath(new URL('../data-static/img', import.meta.url)),
   })
   const server = serve({ fetch: app.fetch, port: config.port })
   consoleLogger.info('web_started', { port: config.port })

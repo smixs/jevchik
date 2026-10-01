@@ -181,8 +181,8 @@ function mountPublic(app: Api, ctx: Ctx): void {
   app.get('/api/context', async (c) => {
     const auth = c.get('auth')
     const chat = (await ctx.db.query('SELECT title FROM chats WHERE chat_id = $1', [auth.chatId]))[0]
-    const me = (await ctx.db.query('SELECT public_id FROM members WHERE chat_id = $1 AND user_id = $2', [auth.chatId, auth.userId]))[0]
-    const viewer = { public_id: me?.public_id ?? null, name: auth.name, is_admin: await viewerIsAdmin(ctx, auth), has_ban: await viewerHasBan(ctx, auth) }
+    const me = (await ctx.db.query('SELECT public_id, karma FROM members WHERE chat_id = $1 AND user_id = $2', [auth.chatId, auth.userId]))[0]
+    const viewer = { public_id: me?.public_id ?? null, name: auth.name, karma: Number(me?.karma ?? 0), is_admin: await viewerIsAdmin(ctx, auth), has_ban: await viewerHasBan(ctx, auth) }
     return c.json({ screen: auth.screen, chat: { title: chat.title }, viewer })
   })
 
@@ -328,10 +328,13 @@ function mountAdmin(app: Api, ctx: Ctx): void {
 }
 
 function mountStatic(app: Api, options: WebOptions): void {
-  app.get('/ban-images/:name', async (c) => {
-    const file = await readStatic(options.imagesDir, c.req.param('name'))
+  // The pictures of the ban and of the interface (medals, the mascot) live in one directory.
+  const picture = async (c: Context): Promise<Response> => {
+    const file = await readStatic(options.imagesDir, c.req.param('name') ?? '')
     return file ? c.body(new Uint8Array(file.body), 200, { 'content-type': file.type, 'cache-control': 'public, max-age=86400' }) : c.notFound()
-  })
+  }
+  app.get('/ban-images/:name', picture)
+  app.get('/img/:name', picture)
 
   app.get('*', async (c) => {
     const path = c.req.path === '/' ? '/index.html' : c.req.path

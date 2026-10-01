@@ -6,6 +6,7 @@ const TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
 }
 
 export async function readStatic(root: string, urlPath: string): Promise<{ body: Buffer; type: string } | null> {

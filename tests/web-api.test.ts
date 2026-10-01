@@ -106,6 +106,8 @@ describe('F16: data of the leaderboard and the personal page', () => {
     expect(mine.karma).toBe(12.5)
     const context = await json(await get(web, '/api/context', VECTORS.alice_me_other))
     expect(context.chat.title).toBe('Other chat')
+    expect([context.viewer.name, context.viewer.karma]).toEqual(['Alice', 99])
+    expect((await json(await get(web, '/api/context', VECTORS.alice_me))).viewer.karma).toBe(12.5)
   })
 
   it('the personal page has every field of section 3.9', async () => {
@@ -185,7 +187,7 @@ describe('F17: the ban list', () => {
           category: 'spam_topic_pivot',
           category_title: 'Поддакнул и достал рекламу',
           explanation: loadJokes().explanations[1],
-          image: '/ban-images/towel.svg',
+          image: '/ban-images/steam.webp',
           state: 'steam',
           date: '2026-09-01T11:00:00.000Z',
         },
@@ -197,9 +199,11 @@ describe('F17: the ban list', () => {
   })
 
   it('the picture is served', async () => {
-    const image = await web.request('/ban-images/towel.svg')
+    const image = await web.request('/ban-images/steam.webp')
     expect(image.status).toBe(200)
-    expect(image.headers.get('content-type')).toBe('image/svg+xml')
+    expect(image.headers.get('content-type')).toBe('image/webp')
+    for (const name of ['mascot', 'medal-1', 'medal-2', 'medal-3']) expect((await web.request(`/img/${name}.webp`)).headers.get('content-type'), name).toBe('image/webp')
+    expect((await web.request('/img/..%2F..%2Fpackage.json')).status).toBe(404)
     expect((await web.request('/ban-images/..%2F..%2Fpackage.json')).status).toBe(404)
   })
 
@@ -248,7 +252,7 @@ describe('T-db-down', () => {
   it('healthz gives 503, the API tells the client, updates are not acknowledged', async () => {
     const dead = new Db('postgres://postgres@127.0.0.1:1/none', 2)
     const ctx = { ...h.ctx, db: dead }
-    const app = createWebApp(ctx, { botToken: BOT_TOKEN, publicDir: await buildClient(), imagesDir: fileURLToPath(new URL('../data-static/ban', import.meta.url)) })
+    const app = createWebApp(ctx, { botToken: BOT_TOKEN, publicDir: await buildClient(), imagesDir: fileURLToPath(new URL('../data-static/img', import.meta.url)) })
     const health = await app.request('/healthz')
     expect(health.status).toBe(503)
     expect(await health.json()).toEqual({ status: 'error', db: 'down' })

@@ -28,7 +28,7 @@ export async function makeWeb(h: Harness): Promise<Web> {
   return createWebApp(h.ctx, {
     botToken: BOT_TOKEN,
     publicDir: await buildClient(),
-    imagesDir: fileURLToPath(new URL('../../data-static/ban', import.meta.url)),
+    imagesDir: fileURLToPath(new URL('../../data-static/img', import.meta.url)),
   })
 }
 

@@ -75,7 +75,7 @@ describe('a chat named by the client', () => {
     h.tg.statusIn.set(`${CHAT}:2`, 'creator')
     expect(await call('/api/chats', VECTORS.no_ctx)).toEqual({ status: 200, body: { chats: [{ chat_id: CHAT, title: 'Agents chat' }] } })
     expect((await call('/api/leaderboard', VECTORS.no_ctx, CHAT)).status).toBe(200)
-    expect((await call('/api/context', VECTORS.no_ctx, CHAT)).body).toMatchObject({ screen: 'lb', viewer: { public_id: null, has_ban: false } })
+    expect((await call('/api/context', VECTORS.no_ctx, CHAT)).body).toMatchObject({ screen: 'lb', viewer: { public_id: null, karma: 0, has_ban: false } })
   })
 
   it('kicked or left by Telegram and unknown to the database: no chat; a failing Telegram gives no access', async () => {

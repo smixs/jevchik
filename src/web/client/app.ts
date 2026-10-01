@@ -4,6 +4,8 @@ interface TelegramWebApp {
   initData: string
   ready?: () => void
   expand?: () => void
+  setHeaderColor?: (color: string) => void
+  setBackgroundColor?: (color: string) => void
 }
 
 declare global {
@@ -16,12 +18,17 @@ const webApp = window.Telegram?.WebApp
 const initData = webApp?.initData ?? ''
 const root = document.getElementById('app') as HTMLElement
 const nav = document.getElementById('nav') as HTMLElement
+/** The header with the viewer and the chat; created when the page has none. */
+const topBar = document.getElementById('top') ?? document.body.insertBefore(document.createElement('header'), document.body.firstChild)
+topBar.id = 'top'
 
 const s = (v: unknown): string => (v === null || v === undefined ? '' : String(v))
 const n = (v: unknown): number => (typeof v === 'number' ? v : Number(v) || 0)
 const list = (v: unknown): Dict[] => (Array.isArray(v) ? (v as Dict[]) : [])
 const dict = (v: unknown): Dict => (typeof v === 'object' && v !== null ? (v as Dict) : {})
 const fmt = (v: unknown): string => n(v).toFixed(2)
+
+const signed = (v: unknown): string => (n(v) > 0 ? `+${fmt(v)}` : fmt(v))
 
 type Child = Node | string | null | undefined | false
 
@@ -30,6 +37,53 @@ function h(tag: string, attrs: Record<string, string> = {}, ...children: Child[]
   for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value)
   for (const child of children) if (child) el.append(child)
   return el
+}
+
+/** Pixel icons on a 16x16 grid: one string per row, '#' is a filled cell. Static, no data goes into them. */
+const ICONS: Record<string, string> = {
+  lb: '................|......####......|......####......|......####......|......####......|......####......|.####.####......|.####.####......|.####.####.####.|.####.####.####.|.####.####.####.|.####.####.####.|.####.####.####.|.####.####.####.|................|................',
+  me: '................|......####......|.....######.....|.....######.....|.....######.....|.....######.....|......####......|................|....########....|...##########...|..############..|..############..|..############..|..############..|................|................',
+  bans: '................|..##...##...##..|...##...##...##.|...##...##...##.|..##...##...##..|.##...##...##...|.##...##...##...|..##...##...##..|...##...##...##.|...##...##...##.|..##...##...##..|.##...##...##...|.##...##...##...|..##...##...##..|................|................',
+  appeal: '................|....######......|...########.....|..###....###....|..##......##....|..##......##....|..###....###....|...########.....|....######......|......##........|......##........|......#####.....|......##........|......####......|......##........|................',
+  admin: '................|...##...........|..####..........|################|..####..........|...##.......##..|...........####.|################|...........####.|.....##.....##..|....####........|################|....####........|.....##.........|................|................',
+  open: '................|.........######.|.........######.|...........####.|..........#####.|.........###.##.|........###..##.|.......###......|.####.###.......|.##....#........|.##.............|.##.......##....|.##.......##....|.##########.....|.#########......|................',
+  up: '................|.......##.......|......####......|.....######.....|....########....|...##########...|..############..|......####......|......####......|......####......|......####......|......####......|......####......|......####......|................|................',
+  down: '................|................|......####......|......####......|......####......|......####......|......####......|......####......|......####......|..############..|...##########...|....########....|.....######.....|......####......|.......##.......|................',
+  reply: '................|................|.############...|##############..|##..........##..|##..##..##..##..|##..##..##..##..|##..........##..|##############..|.############...|...###..........|...##...........|...#............|................|................|................',
+  next: '................|.....##.........|.....###........|......###.......|.......###......|........###.....|.........###....|.........###....|........###.....|.......###......|......###.......|.....###........|.....##.........|................|................|................',
+}
+
+/** The cells of a pixel icon as one path: each run of filled cells in a row is one rectangle. */
+function pixels(rows: string): string {
+  let d = ''
+  rows.split('|').forEach((row, y) => {
+    for (const run of row.matchAll(/#+/g)) d += `M${run.index} ${y}h${run[0].length}v1h-${run[0].length}z`
+  })
+  return d
+}
+
+function icon(name: string): Node {
+  const t = document.createElement('template')
+  t.innerHTML = `<svg class="px" viewBox="0 0 16 16" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path d="${pixels(ICONS[name])}"/></svg>`
+  return t.content.firstChild as Node
+}
+
+/** A picture of the interface: always with its size and lazy. */
+function picture(src: string, cls: string, size: number, alt = ''): HTMLElement {
+  return h('img', { class: cls, src, alt, width: String(size), height: String(size), loading: 'lazy', decoding: 'async' })
+}
+
+/** The colour of an avatar comes from the member's identifier, so it is the same everywhere. */
+function avatar(id: string, name: string, cls = 'ava'): HTMLElement {
+  let hash = 0
+  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  const initial = Array.from(name.trim())[0] ?? '?'
+  return h('span', { class: `${cls} c${hash % 8}`, 'data-initial': initial, 'aria-hidden': 'true' })
+}
+
+/** An empty state: the mascot and the plain explanation. */
+function empty(text: string, attrs: Record<string, string> = {}): HTMLElement {
+  return h('div', { class: 'empty' }, picture('/img/mascot.webp', 'mascot', 132), h('p', { class: 'hint', ...attrs }, text))
 }
 
 class ApiError extends Error {
@@ -60,13 +114,22 @@ let generation = 0
 /** Renders a screen; a slower earlier screen never overwrites a later one. */
 async function render(build: Screen): Promise<void> {
   const mine = ++generation
+  root.setAttribute('aria-busy', 'true')
+  const slow = setTimeout(() => mine === generation && root.replaceChildren(skeleton()), 150)
   let nodes: Child[]
   try {
     nodes = await build()
   } catch (error) {
     nodes = [failure(error)]
   }
-  if (mine === generation) root.replaceChildren(...(nodes.filter(Boolean) as Node[]))
+  clearTimeout(slow)
+  if (mine !== generation) return
+  root.replaceChildren(...(nodes.filter(Boolean) as Node[]))
+  root.removeAttribute('aria-busy')
+}
+
+function skeleton(): HTMLElement {
+  return h('div', { class: 'skel', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'))
 }
 
 /** A plain reason for the answers the server gives on purpose; the general phrase only for an unknown failure. */
@@ -107,14 +170,18 @@ async function leaderboardScreen(period = 'week'): Promise<Child[]> {
     return button
   }))
   const rows = list(data.rows).map((row) => {
-    const tr = h('tr', { class: `row${row.is_me ? ' me' : ''}`, 'data-public-id': s(row.public_id) }, h('td', { class: 'num' }, s(row.place)), h('td', {}, s(row.name)), h('td', { class: 'num' }, fmt(row.karma)))
-    tr.addEventListener('click', () => void render(() => pageScreen(s(row.public_id))))
-    return tr
+    const button = h('button', { class: `row${row.is_me ? ' me' : ''}`, 'data-public-id': s(row.public_id) }, place(n(row.place)), avatar(s(row.public_id), s(row.name)), h('span', { class: 'name' }, s(row.name)), h('span', { class: 'num' }, fmt(row.karma)))
+    button.addEventListener('click', () => void render(() => pageScreen(s(row.public_id))))
+    return h('li', {}, button)
   })
-  const table = rows.length
-    ? h('table', { 'data-testid': 'leaderboard' }, h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, 'Имя'), h('th', { class: 'num' }, 'Карма'))), h('tbody', {}, ...rows))
-    : h('p', { class: 'hint' }, 'За этот период пока никого нет.')
-  return [h('h1', {}, 'Лидерборд'), tabs, table]
+  const board = rows.length ? h('ol', { class: 'board', 'data-testid': 'leaderboard' }, ...rows) : empty('За этот период пока никого нет.')
+  return [h('h1', {}, 'Лидерборд'), tabs, board]
+}
+
+/** The first three places get a medal; the number stays for screen readers. */
+function place(at: number): HTMLElement {
+  if (at < 1 || at > 3) return h('span', { class: 'place' }, String(at))
+  return h('span', { class: 'place' }, picture(`/img/medal-${at}.webp`, 'medal', 52), h('span', { class: 'sr-only' }, String(at)))
 }
 
 // ---------------------------------------------------------------- personal page
@@ -125,39 +192,42 @@ function chartSvg(points: Dict[]): HTMLElement | null {
   const min = Math.min(...values)
   const span = Math.max(...values) - min || 1
   const step = 300 / (points.length - 1)
-  const path = values.map((v, i) => `${(i * step).toFixed(1)},${(76 - ((v - min) / span) * 72).toFixed(1)}`).join(' ')
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  svg.setAttribute('class', 'chart')
-  svg.setAttribute('viewBox', '0 0 300 80')
-  svg.setAttribute('role', 'img')
-  svg.setAttribute('aria-label', 'График кармы')
-  const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
-  line.setAttribute('points', path)
-  line.setAttribute('fill', 'none')
-  line.setAttribute('stroke', 'currentColor')
-  line.setAttribute('stroke-width', '2')
-  svg.append(line)
-  return svg as unknown as HTMLElement
+  const path = values.map((v, i) => `${(i * step).toFixed(1)},${(112 - ((v - min) / span) * 104).toFixed(1)}`).join(' ')
+  const t = document.createElement('template')
+  t.innerHTML =
+    '<svg class="chart" viewBox="0 0 300 120" preserveAspectRatio="none" role="img" aria-label="График кармы">' +
+    '<defs><linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".38"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>' +
+    `<polygon fill="url(#chart-fill)" points="0,120 ${path} 300,120"/>` +
+    `<polyline fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="${path}"/></svg>`
+  return h('div', { class: 'card chartbox' }, t.content.firstChild)
 }
 
-function stat(field: string, label: string, value: string): HTMLElement {
-  return h('div', { class: 'stat', 'data-field': field }, h('b', {}, value), h('span', {}, label))
+function stat(field: string, label: string, value: string, marker: Child = null): HTMLElement {
+  return h('div', { class: 'stat', 'data-field': field }, h('b', {}, marker, value), h('span', {}, label))
+}
+
+/** A pixel arrow beside the weekly change: up for a gain, down for a loss. */
+function trend(delta: number): Child {
+  if (delta === 0) return null
+  return h('i', { class: delta > 0 ? 'rise' : 'fall' }, icon(delta > 0 ? 'up' : 'down'))
+}
+
+function messageCard(m: Dict): HTMLElement {
+  const link = s(m.link)
+  const meta = h('p', { class: 'meta' }, h('span', { 'aria-label': 'Карма' }, icon('up'), signed(m.karma)), h('span', { 'aria-label': 'Ответы' }, icon('reply'), s(n(m.replies))))
+  return h('li', { class: 'card msg' }, h('p', { class: 'excerpt' }, s(m.excerpt)), meta, link ? h('a', { class: 'btn', href: link, rel: 'noopener' }, icon('open'), 'Открыть в чате') : null)
 }
 
 function messageBlock(title: string, field: string, items: Dict[]): HTMLElement {
-  const lines = items.map((m) => {
-    const text = h('span', {}, s(m.excerpt))
-    const link = s(m.link)
-    return h('li', {}, text, link ? h('a', { href: link, rel: 'noopener' }, ' ↗') : null)
-  })
-  return h('section', { class: 'card', 'data-field': field }, h('h2', {}, title), lines.length ? h('ul', {}, ...lines) : h('p', { class: 'hint' }, 'Пока пусто.'))
+  const cards = items.map(messageCard)
+  return h('section', { 'data-field': field }, h('h2', {}, title), cards.length ? h('ul', { class: 'msgs' }, ...cards) : h('p', { class: 'hint' }, 'Пока пусто.'))
 }
 
 function statsGrid(page: Dict): HTMLElement {
   return h('div', { class: 'grid' },
     stat('karma', 'Карма', fmt(page.karma)),
     stat('place', 'Место', s(page.place) || '-'),
-    stat('week_delta', 'За неделю', fmt(page.week_delta)),
+    stat('week_delta', 'За неделю', fmt(page.week_delta), trend(n(page.week_delta))),
     stat('thanks_count', 'Благодарности', s(page.thanks_count)),
     stat('answers_count', 'Ответы на вопросы', s(page.answers_count)),
     stat('caught_spammers_count', 'Пойманные спамеры', s(page.caught_spammers_count)),
@@ -171,7 +241,7 @@ function decayNote(warning: Dict): HTMLElement | null {
 }
 
 function hideButton(page: Dict): HTMLElement {
-  const button = h('button', { class: 'primary', 'data-action': 'hide' }, page.hidden ? 'Показать мою страницу' : 'Скрыть мою страницу')
+  const button = h('button', { class: 'secondary', 'data-action': 'hide' }, page.hidden ? 'Показать мою страницу' : 'Скрыть мою страницу')
   button.addEventListener('click', () => void api('/api/me/hide', { method: 'POST', body: JSON.stringify({ hidden: !page.hidden }) }).then(() => render(meScreen)).catch((e: unknown) => render(async () => [failure(e)])))
   return button
 }
@@ -180,7 +250,7 @@ function pageView(page: Dict, self: boolean): Child[] {
   const messages = dict(page.messages)
   return [
     h('h1', {}, s(page.name) || 'Моя страница'),
-    page.empty ? h('p', { class: 'hint' }, 'Здесь появятся ваши цифры, когда вы напишете в чате и получите первые оценки.') : null,
+    page.empty ? empty('Здесь появятся ваши цифры, когда вы напишете в чате и получите первые оценки.') : null,
     decayNote(dict(page.decay_warning)),
     statsGrid(page),
     chartSvg(list(page.chart)),
@@ -209,9 +279,14 @@ async function pageScreen(publicId: string): Promise<Child[]> {
 async function bansScreen(): Promise<Child[]> {
   const data = await api('/api/bans')
   const cards = list(data.bans).map((b) =>
-    h('article', { class: 'card', 'data-ban-id': s(b.id) }, h('img', { class: 'ban', src: s(b.image), alt: '' }), h('h2', {}, s(b.name)), h('p', { 'data-field': 'category' }, s(b.category_title)), h('p', { class: 'hint', 'data-field': 'explanation' }, s(b.explanation)), h('p', { class: 'hint' }, new Date(s(b.date)).toLocaleDateString('ru-RU'))),
+    h(
+      'article',
+      { class: 'card ban-card', 'data-ban-id': s(b.id) },
+      picture(s(b.image), 'ban', 80),
+      h('div', { class: 'body' }, h('h2', {}, s(b.name)), h('p', { 'data-field': 'category' }, s(b.category_title)), h('p', { class: 'hint', 'data-field': 'explanation' }, s(b.explanation)), h('p', { class: 'hint' }, new Date(s(b.date)).toLocaleDateString('ru-RU'))),
+    ),
   )
-  return [h('h1', {}, 'Баня'), ...(cards.length ? cards : [h('p', { class: 'hint' }, 'В бане пусто.')])]
+  return [h('h1', {}, 'Баня'), ...(cards.length ? cards : [empty('В бане пусто.')])]
 }
 
 const APPEAL_TEXT: Record<string, string> = {
@@ -246,7 +321,7 @@ async function appealScreen(): Promise<Child[]> {
       })
   })
   const blocked = state.status !== 'none' || state.allowed === false
-  return [h('h1', {}, 'Разбан'), h('p', { class: 'hint' }, 'Одна попытка. Своими словами: почему вы в этом чате и что произошло.'), blocked ? h('p', { class: 'hint', 'data-field': 'appeal_state' }, APPEAL_TEXT[s(state.status)] ?? 'Разбан недоступен.') : start, area, send, result]
+  return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, h('p', { class: 'hint' }, 'Одна попытка. Своими словами: почему вы в этом чате и что произошло.'), blocked ? h('p', { 'data-field': 'appeal_state' }, APPEAL_TEXT[s(state.status)] ?? 'Разбан недоступен.') : start, area, send, result)]
 }
 
 // ---------------------------------------------------------------- admin
@@ -308,14 +383,14 @@ function settingRow(spec: Dict, values: Dict, versions: Dict): HTMLElement[] {
     }
     saveSetting(name, body).then(done, failed)
   })
-  return [h('label', { for: `set-${name}` }, name), input, save, status]
+  return [h('div', { class: 'setting' }, h('label', { for: `set-${name}` }, name), input, save, status)]
 }
 
 async function settingsForm(): Promise<HTMLElement> {
   const data = await api('/api/admin/settings')
   const values = dict(data.values)
   const versions = dict(data.versions)
-  const box = h('section', { 'data-field': 'settings' }, h('h2', {}, 'Настройки'))
+  const box = h('section', { class: 'card', 'data-field': 'settings' }, h('h2', {}, 'Настройки'))
   for (const spec of list(dict(data.schema).keys)) box.append(...settingRow(spec, values, versions))
   return box
 }
@@ -328,7 +403,7 @@ function cardView(c: Dict): HTMLElement {
     { 'data-card': s(c.card_id) },
     h('p', { class: 'hint' }, `${s(c.kind)}: ${s(c.status)} ${s(c.delivery)}`),
     h('p', { class: 'quote', 'data-field': 'card_text' }, s(c.text)),
-    link.startsWith('https://t.me/') && h('a', { href: link, target: '_blank', rel: 'noopener', 'data-field': 'card_link' }, 'Открыть сообщение'),
+    link.startsWith('https://t.me/') && h('a', { class: 'btn', href: link, target: '_blank', rel: 'noopener', 'data-field': 'card_link' }, icon('open'), 'Открыть сообщение'),
   )
 }
 
@@ -349,13 +424,13 @@ async function adminScreen(): Promise<Child[]> {
   extend.addEventListener('click', () => void api('/api/admin/observation', { method: 'POST', body: JSON.stringify({ until: (until as HTMLInputElement).value }) }).then(() => (obsStatus.textContent = 'Продлено')).catch(() => (obsStatus.textContent = 'Не удалось продлить')))
   return [
     h('h1', {}, 'Экран админа'),
-    obsStatus, until, extend,
+    h('section', { class: 'card' }, obsStatus, h('div', { class: 'row2' }, until, extend)),
     h('section', { class: 'card' }, h('h2', {}, 'Импорт истории'), h('p', { class: 'hint' }, 'Файл берётся на доверии: совпадение номера чата защищает от ошибки, но не доказывает, что файл настоящий. Берётся окно из настройки import_days (по умолчанию 90 суток), только плюсы.'), file, upload, importStatus),
-    h('section', { class: 'card', 'data-field': 'operations' }, h('h2', {}, 'Операции с проблемами'), ...list(ops.operations).map((o) => h('p', {}, `${s(o.operation_kind)}: ${s(o.status)} ${s(o.last_error_code)}`))),
-    h('section', { class: 'card', 'data-field': 'held' }, h('h2', {}, 'Убранные сообщения (до 30 суток)'), ...list(held.held).map((m) => h('p', {}, `${s(m.author_name)} (${s(m.reason)}): ${s(m.text)}`))),
+    h('section', { class: 'card list', 'data-field': 'operations' }, h('h2', {}, 'Операции с проблемами'), ...list(ops.operations).map((o) => h('p', {}, `${s(o.operation_kind)}: ${s(o.status)} ${s(o.last_error_code)}`))),
+    h('section', { class: 'card list', 'data-field': 'held' }, h('h2', {}, 'Убранные сообщения (до 30 суток)'), ...list(held.held).map((m) => h('p', {}, `${s(m.author_name)} (${s(m.reason)}): ${s(m.text)}`))),
     h('section', { class: 'card', 'data-field': 'cards' }, h('h2', {}, 'Карточки'), ...list(cards.cards).map(cardView)),
     await settingsForm(),
-    h('section', { class: 'card', 'data-field': 'audit' }, h('h2', {}, 'Журнал изменений'), ...list(audit.audit).map((a) => h('p', { class: 'hint' }, `${s(a.key)}: ${JSON.stringify(a.old_value)} → ${JSON.stringify(a.new_value)}`))),
+    h('section', { class: 'card list', 'data-field': 'audit' }, h('h2', {}, 'Журнал изменений'), ...list(audit.audit).map((a) => h('p', { class: 'hint' }, `${s(a.key)}: ${JSON.stringify(a.old_value)} → ${JSON.stringify(a.new_value)}`))),
   ]
 }
 
@@ -385,7 +460,7 @@ function tabsFor(viewer: Dict): string[] {
 function showTabs(viewer: Dict): string[] {
   const tabs = tabsFor(viewer)
   nav.replaceChildren(...LABELS.filter(([key]) => tabs.includes(key)).map(([key, label]) => {
-    const button = h('button', { 'data-screen': key }, label)
+    const button = h('button', { 'data-screen': key }, icon(key), h('span', {}, label))
     button.addEventListener('click', () => {
       navigated = true
       open(key)
@@ -395,14 +470,40 @@ function showTabs(viewer: Dict): string[] {
   return tabs
 }
 
+/** The header: the viewer's initial, name and karma, and the chat. */
+function showHeader(context: Dict): void {
+  const viewer = dict(context.viewer)
+  const name = s(viewer.name)
+  topBar.replaceChildren(
+    avatar(s(viewer.public_id) || name, name, 'ava big'),
+    h('div', { class: 'who' }, h('b', {}, name), h('span', {}, s(dict(context.chat).title))),
+    h('span', { class: 'karma', 'aria-label': `Карма ${signed(viewer.karma)}` }, signed(viewer.karma)),
+  )
+  topBar.removeAttribute('hidden')
+}
+
 function enter(context: Dict): void {
+  showHeader(context)
   const tabs = showTabs(dict(context.viewer))
   if (!navigated) open(tabs.includes(s(context.screen)) ? s(context.screen) : 'lb')
+}
+
+/** Telegram's own header and background take the colour of the page, when this Telegram can do it. */
+function paintTelegram(): void {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+  if (!bg) return
+  try {
+    webApp?.setHeaderColor?.(bg)
+    webApp?.setBackgroundColor?.(bg)
+  } catch {
+    // an old Telegram without these methods keeps its own colours
+  }
 }
 
 function boot(): void {
   webApp?.ready?.()
   webApp?.expand?.()
+  paintTelegram()
   void api('/api/context').then(enter).catch((error: unknown) => {
       if (error instanceof ApiError && s(error.body.error) === 'no_context') return void chooseChat()
       void render(async () => [failure(error)])
@@ -414,10 +515,10 @@ async function chooseChat(): Promise<void> {
   const chats = await api('/api/chats').then((data) => list(data.chats)).catch((error: unknown) => error)
   if (!Array.isArray(chats)) return void render(async () => [failure(chats)])
   if (chats.length === 1) return enterChat(n(chats[0].chat_id))
-  if (chats.length === 0) return void render(async () => [h('p', { class: 'hint', 'data-field': 'no_chats' }, 'Вы пока не участвуете ни в одном чате с Жевчиком.')])
+  if (chats.length === 0) return void render(async () => [empty('Вы пока не участвуете ни в одном чате с Жевчиком.', { 'data-field': 'no_chats' })])
   void render(async () => [
-    h('section', { 'data-field': 'chats' }, h('h1', {}, 'Выберите чат'), ...chats.map((chat) => {
-      const button = h('button', { 'data-chat-id': s(chat.chat_id) }, s(chat.title))
+    h('section', { 'data-field': 'chats' }, picture('/img/mascot.webp', 'mascot', 132), h('h1', {}, 'Выберите чат'), ...chats.map((chat) => {
+      const button = h('button', { 'data-chat-id': s(chat.chat_id) }, h('span', {}, s(chat.title)), icon('next'))
       button.addEventListener('click', () => enterChat(n(chat.chat_id)))
       return button
     })),
