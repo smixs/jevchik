@@ -109,14 +109,19 @@ export async function upsertMember(q: Q, chatId: number, user: TgUser, now: Date
 
 /**
  * The author of a message as a member. Section 3.6.4: a channel has no join to see, so a channel first seen in a live message
- * of its own is marked as joined then (a newcomer); one known before, or from an imported history, is not.
+ * of its own is marked as joined then (a newcomer); one known before, or from an imported history, is not. During the first
+ * week after the bot came to the chat every channel it meets is taken for one that wrote there before: the bot cannot tell an
+ * old channel from a new one until the history is loaded, and banning a regular is worse than missing a spammer.
  */
 export async function upsertAuthor(q: Q, chatId: number, author: Author, at: { now: Date; live: boolean }): Promise<void> {
   const joined = author.isChannel && at.live ? at.now : null
   await q.query(
-    `INSERT INTO members (chat_id, user_id, display_name, username, is_channel, joined_seen_at, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO members (chat_id, user_id, display_name, username, is_channel, joined_seen_at, created_at)
+     VALUES ($1,$2,$3,$4,$5,
+       CASE WHEN (SELECT observation_started_at FROM chats WHERE chat_id = $1) <= $6::timestamptz - make_interval(days => $8) THEN $6::timestamptz END,
+       $7)
      ON CONFLICT (chat_id, user_id) DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username`,
-    [chatId, author.id, author.name, author.username, author.isChannel, joined, at.now],
+    [chatId, author.id, author.name, author.username, author.isChannel, joined, at.now, OBSERVATION_DAYS],
   )
 }
 

@@ -4,7 +4,7 @@ import { parseExport, startImport } from '../src/import.js'
 import { loadJokes } from '../src/sanctions.js'
 import { banList } from '../src/web/queries.js'
 import { tgError } from './support/fakes.js'
-import { ADMIN, ALICE, BOB, CAROL, CHAT, DAY, command, createHarness, callback, edited, eventsOf, karmaOf, message, pastObservation, reaction, setKarma, type Harness, type User } from './support/harness.js'
+import { ADMIN, ALICE, BOB, CAROL, CHAT, DAY, OTHER_CHAT, botJoined, command, createHarness, callback, edited, eventsOf, karmaOf, message, pastObservation, reaction, setKarma, type Harness, type User } from './support/harness.js'
 import { VECTORS } from './support/vectors.js'
 import { get, makeWeb, seedWorld } from './support/web.js'
 
@@ -171,6 +171,15 @@ describe('F31: karma of a channel (section 3.6.4)', () => {
 })
 
 describe('F31: spam of a new channel (section 3.6.4)', () => {
+  it('in the first week after the bot came a channel met for the first time is taken for an old one: spam 0.95, nothing happens', async () => {
+    await h.send(botJoined(OTHER_CHAT))
+    await h.send(message({ id: 690, chat: OTHER_CHAT, from: CHANNEL_BOT, text: SPAM, extra: { sender_chat: CHANNEL } }))
+    await h.app.settle()
+    expect(calls()).toEqual([])
+    expect(await h.db.query('SELECT joined_seen_at FROM members WHERE chat_id = $1 AND user_id = $2', [OTHER_CHAT, CHANNEL.id])).toEqual([{ joined_seen_at: null }])
+    expect(await h.db.query('SELECT 1 FROM bans')).toEqual([])
+  })
+
   it('a new channel with spam 0.95: deleted, the channel banned, a bath record, a joke without the appeal button, the card', async () => {
     await h.send(post(700, SPAM))
     await h.app.settle()
