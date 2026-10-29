@@ -187,20 +187,19 @@ describe('the appeal and admin screens', () => {
     h.tg.members.clear()
   })
 
-  it('appeal: "Я человек", the field, the result', async () => {
+  it('appeal: one button «Разбанить меня», no field, no explanation, the result', async () => {
     await h.db.query(`INSERT INTO bans (chat_id, user_id, category, joke_idx, explanation_idx, image_idx, state, steam_until, created_at) VALUES ($1,3,'admin',0,0,0,'steam',$2,$2)`, [CHAT, h.clock.now()])
     await h.db.query('UPDATE members SET bans_count = 1 WHERE user_id = 3 AND chat_id = $1', [CHAT])
-    h.jev.script('Я не бот, пришёл за советом', { appeal_genuine: 0.95 })
     const page = await open(VECTORS.carol_appeal)
-    await page.waitFor('button[data-action=human]')
+    await page.waitFor('button[data-action=unban]')
     expect(page.$$('#nav button').map((b) => b.getAttribute('data-screen'))).toEqual(['lb', 'me', 'bans', 'appeal'])
-    await page.click('button[data-action=human]')
-    const area = page.$('textarea') as unknown as { value: string }
-    area.value = 'Я не бот, пришёл за советом'
-    const send = page.$$('button.primary').find((b) => b.textContent === 'Отправить')!
-    send.dispatchEvent(new page.window.Event('click', { bubbles: true }))
+    expect(page.$('textarea')).toBeNull()
+    expect(page.$('button[data-action=unban]')?.textContent).toBe('Разбанить меня')
+    expect(page.text()).not.toContain('Своими словами')
+    await page.click('button[data-action=unban]')
     for (let i = 0; i < 100 && !page.$('[data-field=appeal_result]')?.textContent; i++) await new Promise((r) => setTimeout(r, 20))
     expect(page.$('[data-field=appeal_result]')?.textContent).toContain('ограничение снято')
+    expect(h.jev.requests).toEqual([])
   })
 
   it('admin: settings with a save button, operations, cards, import and observation blocks', async () => {

@@ -111,8 +111,8 @@ describe('rules 4 and 5 of section 3.6', () => {
     h.tg.calls.length = 0
   })
 
-  it('rule 4 is cancelled (section 3.6.2): spam 0.60 from a newcomer stays in the chat and admins are asked', async () => {
-    h.jev.script(MILD, { spam_other_offer: 0.6 })
+  it('rule 4 is cancelled (section 3.6.2): spam 0.50 from a newcomer stays in the chat and admins are asked', async () => {
+    h.jev.script(MILD, { spam_other_offer: 0.5 })
     await h.send(message({ id: 701, from: CAROL, text: MILD }))
     await h.app.settle()
     expect(h.tg.count('deleteMessage')).toBe(0)
@@ -141,15 +141,15 @@ describe('rules 4 and 5 of section 3.6', () => {
     expect(h.tg.calls.filter((c) => c.method !== 'getChat')).toEqual([])
   })
 
-  it('a threshold at exactly the boundary counts (>=): 0.90 deletes', async () => {
-    h.jev.script(MILD, { spam_other_offer: 0.9 })
+  it('a threshold at exactly the boundary counts (>=): 0.60 deletes', async () => {
+    h.jev.script(MILD, { spam_other_offer: 0.6 })
     await h.send(message({ id: 701, from: CAROL, text: MILD }))
     await h.app.settle()
     expect(h.tg.count('deleteMessage')).toBe(1)
   })
 
-  it('a first message between 0.30 and 0.90 is neither deleted nor sent to the steam room, admins are asked', async () => {
-    h.jev.script(MILD, { spam_other_offer: 0.89 })
+  it('a first message between 0.30 and 0.60 is neither deleted nor sent to the steam room, admins are asked', async () => {
+    h.jev.script(MILD, { spam_other_offer: 0.59 })
     await h.send(message({ id: 800, from: { id: 50, first_name: 'Dave' }, text: MILD }))
     await h.app.settle()
     expect(h.tg.count('restrictChatMember')).toBe(0)
@@ -172,9 +172,9 @@ describe('F10: participants with high karma are never punished by the bot', () =
     expect(cards[0].text).toContain('высокой кармой')
   })
 
-  it('soft check: a message with a link and spam 0.60 stays, admins get a card', async () => {
+  it('soft check: a message with a link and spam 0.50 stays, admins get a card', async () => {
     await seedMember(h, CAROL, 150)
-    h.jev.script('смотри https://example.com', { spam_other_offer: 0.6 })
+    h.jev.script('смотри https://example.com', { spam_other_offer: 0.5 })
     await h.send(message({ id: 700, from: CAROL, text: 'смотри https://example.com' }))
     await h.app.settle()
     expect(h.tg.count('deleteMessage')).toBe(0)

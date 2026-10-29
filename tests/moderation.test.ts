@@ -155,6 +155,140 @@ describe('F15: /report', () => {
   })
 })
 
+describe('F35: a flag by the reaction 🖕 (section 3.7)', () => {
+  const flag = (from = BOB, id = 900, emoji = '🖕') => reaction({ message_id: id, from, new: [emoji] })
+  const botReactions = () => h.tg.of('setMessageReaction').map((c) => c.args)
+  /** A member with karma waits for the admins; a newcomer without it goes to the steam room at once. */
+  const withKarma = (user = ALICE, karma = 10) => h.db.query('UPDATE members SET karma = $3 WHERE chat_id = $1 AND user_id = $2', [CHAT, user.id, karma])
+  const flagCards = () => adminCards().filter((c) => String(c.args[1]).includes('Участник пожаловался'))
+
+  it('a member puts 🖕 on an author with karma: admins get the card with the quote and «Спам» / «Не спам»; the message, karma and reactions are not touched', async () => {
+    await withKarma()
+    await h.send(flag())
+    await h.app.settle()
+    expect(adminCards()).toHaveLength(1)
+    expect(adminCards()[0].args[1]).toContain('Участник пожаловался: похоже на спам, реши')
+    expect(adminCards()[0].args[1]).toContain('плохое сообщение')
+    expect(buttons().map((b) => b.text)).toEqual(['Спам', 'Не спам'])
+    expect(deletes()).toEqual([])
+    expect(botReactions()).toEqual([])
+    expect(await karmaOf(h, ALICE.id)).toBe(10)
+    expect(await h.db.query('SELECT 1 FROM reports')).toEqual([])
+  })
+
+  it('a flagger with high karma changes nothing either: the message stays until an admin decides', async () => {
+    await seedMember(h, BOB, 100)
+    await withKarma()
+    await h.send(flag())
+    await h.app.settle()
+    expect(deletes()).toEqual([])
+    expect(adminCards()).toHaveLength(1)
+  })
+
+  it('«Спам» on the card: the message is deleted and the author goes to the steam room; «Не спам» leaves everything', async () => {
+    await withKarma()
+    await h.send(flag())
+    await h.app.settle()
+    await h.send(callback({ data: buttons()[0].callback_data, from: ADMIN }))
+    await h.app.settle()
+    expect(deletes()).toEqual([900])
+    expect(h.tg.of('restrictChatMember').map((c) => c.args[1])).toEqual([ALICE.id])
+    expect(await h.db.query('SELECT state FROM bans WHERE user_id = $1', [ALICE.id])).toEqual([{ state: 'steam' }])
+  })
+
+  it('a second 🖕 from somebody else, the author on themselves, a bot and a reaction taken off make no second card', async () => {
+    await withKarma()
+    await h.send(flag())
+    await h.send(flag(CAROL))
+    await h.send(flag(ALICE))
+    await h.send(reaction({ message_id: 900, from: { id: 777, first_name: 'Jevchik', is_bot: true } as never, new: ['🖕'] }))
+    await h.send(reaction({ message_id: 900, from: BOB, old: ['🖕'], new: [] }))
+    await h.app.settle()
+    expect(adminCards()).toHaveLength(1)
+  })
+
+  it('the daily limit of reports holds for flags too', async () => {
+    await withKarma()
+    for (let i = 0; i < 10; i++) {
+      await h.send(message({ id: 1000 + i, from: ALICE, text: `сообщение ${i}` }))
+      await h.send(flag(BOB, 1000 + i))
+    }
+    await h.app.settle()
+    h.tg.calls.length = 0
+    await h.send(flag(BOB, 900))
+    await h.app.settle()
+    expect(adminCards()).toHaveLength(0)
+  })
+
+  it('a newcomer without karma is flagged: the message goes away and the author goes to the steam room at once, no card to decide', async () => {
+    await h.send(flag())
+    await h.app.settle()
+    expect(deletes()).toEqual([900])
+    expect(h.tg.of('restrictChatMember').map((c) => c.args[1])).toEqual([ALICE.id])
+    expect(await h.db.query('SELECT state FROM bans WHERE user_id = $1', [ALICE.id])).toEqual([{ state: 'steam' }])
+    expect(flagCards()).toEqual([])
+    expect(adminCards().map((c) => String(c.args[1]).split('\n')[0])).toEqual(['Удалил спам и заглушил автора'])
+    expect((await h.db.query(`SELECT text, reason FROM held_texts WHERE message_id = 900`))[0]).toEqual({ text: 'плохое сообщение', reason: 'spam' })
+    await h.send(flag(CAROL))
+    await h.app.settle()
+    expect(h.tg.count('restrictChatMember')).toBe(1)
+  })
+
+  it('boundary: karma exactly report_steam_karma (5) waits for the admins', async () => {
+    await withKarma(ALICE, 5)
+    await h.send(flag())
+    await h.app.settle()
+    expect(deletes()).toEqual([])
+    expect(flagCards()).toHaveLength(1)
+    await withKarma(ALICE, 4.99)
+    await h.send(message({ id: 901, from: ALICE, text: 'ещё одно' }))
+    await h.send(flag(BOB, 901))
+    await h.app.settle()
+    expect(deletes()).toEqual([901])
+  })
+
+  it('a member past the first messages waits for the admins whatever the karma', async () => {
+    for (let i = 0; i < 5; i++) await h.send(message({ id: 1100 + i, from: ALICE, text: `сообщение ${i}` }))
+    await h.app.settle()
+    await h.send(flag(BOB, 1104))
+    await h.app.settle()
+    expect(deletes()).toEqual([])
+    expect(flagCards()).toHaveLength(1)
+  })
+
+  it('an old early message of a long-time member waits for the admins: the messages are counted now', async () => {
+    for (let i = 0; i < 6; i++) await h.send(message({ id: 1200 + i, from: ALICE, text: `сообщение ${i}` }))
+    await h.app.settle()
+    await h.send(flag(BOB, 900))
+    await h.app.settle()
+    expect(deletes()).toEqual([])
+    expect(flagCards()).toHaveLength(1)
+  })
+
+  it('a flag that sent its author to the steam room counts towards the daily limit', async () => {
+    const { changeSetting } = await import('../src/settings/settings.js')
+    await changeSetting(h.db, { chatId: CHAT, key: 'report_daily_limit', value: 1, baseVersion: 0, actor: ADMIN.id, now: h.clock.now() })
+    await h.send(flag())
+    await h.app.settle()
+    expect(deletes()).toEqual([900])
+    await h.send(message({ id: 960, from: CAROL, text: 'другое сообщение' }))
+    await h.app.settle()
+    await h.send(flag(BOB, 960))
+    await h.app.settle()
+    expect(deletes()).toEqual([900])
+    expect(flagCards()).toEqual([])
+  })
+
+  it('with an empty report_reaction_emoji the sign is off and 🖕 counts like any other reaction', async () => {
+    const { changeSetting } = await import('../src/settings/settings.js')
+    await changeSetting(h.db, { chatId: CHAT, key: 'report_reaction_emoji', value: '', baseVersion: 0, actor: ADMIN.id, now: h.clock.now() })
+    await h.send(flag())
+    await h.app.settle()
+    expect(adminCards()).toHaveLength(0)
+    expect(await karmaOf(h, ALICE.id)).toBeGreaterThan(0)
+  })
+})
+
 describe('F15: privileges of high karma', () => {
   it('voter weight: a reaction from karma 100 is worth more than from karma 0', async () => {
     await seedMember(h, CAROL, 100)

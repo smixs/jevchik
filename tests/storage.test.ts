@@ -175,7 +175,7 @@ describe('the question set keeps the normative keys and types', () => {
   const base = () => JSON.parse(JSON.stringify(loadDefaultQuestions())) as Record<string, Record<string, unknown>>
 
   it('removing or renaming a normative question is refused', async () => {
-    for (const name of ['appeal_genuine', 'spam_earnings_crypto', 'spam_topic_pivot', 'spam_channel_bait', 'spam_other_offer', 'profile_promo', 'usefulness', 'tone']) {
+    for (const name of ['spam_earnings_crypto', 'spam_topic_pivot', 'spam_channel_bait', 'spam_other_offer', 'profile_promo', 'usefulness', 'tone']) {
       const removed = base()
       delete removed[name]
       await expect(change(removed), `remove ${name}`).rejects.toThrow(name)

@@ -63,7 +63,7 @@ describe('defaults', () => {
     expect([s.base_reaction, s.base_reply, s.base_quote, s.base_dialog, s.base_thanks, s.base_minus]).toEqual([1, 2, 3, 4, 6, -1])
     expect([s.report_author_delta, s.report_reporter_delta, s.voter_scale, s.minus_daily_limit, s.minus_min_karma, s.karma_lower_bound, s.silence_days]).toEqual([-20, 5, 100, 5, 1, -50, 14])
     expect(s.usefulness_points).toEqual([0, 0, 0.1, 0.25, 0.5])
-    expect([s.spam_auto_threshold, s.profile_auto_threshold, s.spam_review_delete_threshold, s.spam_review_threshold, s.protect_threshold]).toEqual([0.9, 0.8, 0.5, 0.3, 100])
+    expect([s.spam_auto_threshold, s.profile_auto_threshold, s.spam_review_delete_threshold, s.spam_review_threshold, s.protect_threshold]).toEqual([0.6, 0.8, 0.5, 0.3, 100])
     expect([s.threshold_is_thanks, s.threshold_is_answer, s.threshold_is_question, s.threshold_is_flood, s.threshold_media_fits, s.threshold_rude, s.previous_messages_count]).toEqual([0.5, 0.5, 0.5, 0.5, 0.5, 0.8, 8])
     expect([s.react_min_level, s.react_min_confidence, s.timezone, s.dialog_window_hours]).toEqual([4, 0.7, 'Asia/Tashkent', 24])
   })

@@ -266,18 +266,19 @@ describe('one sanction, one request; the model never decides about a record of a
     expect(await requestCard()).toMatchObject({ status: 'resolved', resolution: 'unban' })
   })
 
-  it('an administrator takes the record over while the model judges the appeal: the verdict is dropped', async () => {
-    const real = h.jev.evaluate.bind(h.jev)
-    h.jev.script('я человек', { appeal_genuine: 0.99 })
-    h.jev.evaluate = async (request) => {
-      await h.db.query(`UPDATE bans SET source = 'admin', by_admin_name = 'Admin', appeal_status = 'none' WHERE chat_id = $1 AND user_id = $2`, [CHAT, DMITRY])
-      return real(request)
-    }
-    await h.db.query(`INSERT INTO members (chat_id, user_id, display_name, created_at) VALUES ($1,555,'x',$2) ON CONFLICT DO NOTHING`, [CHAT, h.clock.now()])
+  it('model Appeal, AdminWins: the button pressed while an administrator bans waits, then leaves the ban of the administrator', async () => {
+    h.tg.fail('banChatMember', tgError.server(), 1)
+    await act(DMITRY, 'ban')
+    expect(await h.db.query('SELECT state, source FROM bans WHERE chat_id = $1 AND user_id = $2', [CHAT, DMITRY])).toEqual([{ state: 'steam', source: 'auto' }])
     const { submitAppeal } = await import('../src/appeal.js')
-    expect(await submitAppeal(h.ctx, CHAT, DMITRY, 'я человек')).toEqual({ status: 'not_allowed' })
-    expect(h.tg.count('restrictChatMember')).toBe(0)
-    expect(await h.db.query('SELECT source, appeal_status FROM bans WHERE chat_id = $1 AND user_id = $2', [CHAT, DMITRY])).toEqual([{ source: 'admin', appeal_status: 'none' }])
+    expect(await submitAppeal(h.ctx, CHAT, DMITRY)).toEqual({ status: 'accepted', lifted: false })
+    for (let i = 0; i < 6; i++) {
+      h.clock.advance(HOUR)
+      await h.app.settle()
+    }
+    expect(await h.db.query('SELECT state, source FROM bans WHERE chat_id = $1 AND user_id = $2', [CHAT, DMITRY])).toEqual([{ state: 'banned', source: 'admin' }])
+    expect(memberCalls().filter((c) => c[2] === DMITRY && c[0] !== 'banChatMember')).toEqual([])
+    expect(await submitAppeal(h.ctx, CHAT, DMITRY)).toEqual({ status: 'not_allowed' })
   })
 
   it('a banned member has no place on the personal page', async () => {

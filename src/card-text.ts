@@ -8,6 +8,7 @@ export type CardKind =
   | 'steamed'
   | 'spam_command'
   | 'review'
+  | 'flagged'
   | 'protected'
   | 'would_do'
   | 'media_unverified'
@@ -36,6 +37,8 @@ export interface CardPayload {
   recipient?: number
   /** A card about a command message (its deletion failed): nothing to decide about it. */
   noActions?: boolean
+  /** Section 3.7: who put the report emoji on the message. */
+  flagger?: number
   /** The sanction the member asks to lift (section 3.6.5): what it is, until when, who gave it. */
   note?: string
 }
@@ -55,9 +58,11 @@ const TITLES: Record<CardKind, string> = {
   steamed: 'Удалил спам и заглушил автора',
   spam_command: 'Удалил спам и заглушил автора',
   review: 'Похоже на спам, реши',
+  flagged: 'Участник пожаловался: похоже на спам, реши',
   protected: 'Похоже на спам от участника с высокой кармой, реши',
   would_do: 'Старая карточка, бот по ней ничего не сделал',
   media_unverified: 'Новичок прислал медиа без подписи, описать его не удалось, реши',
+  // Cards from before 29.10, when the bot judged an explanation and asked the admins when in doubt.
   appeal_review: 'Объяснение при разбане вызвало сомнение',
   unban_request: 'Участник просит разбан',
   target_admin: 'Участник - админ, наказывать не стал',
@@ -102,7 +107,7 @@ const LABELS: Record<CardAction, string> = {
  * The cards about a message whose buttons follow the state of the message and of the sanction (section 3.6.2), failures of an
  * automatic deletion included.
  */
-export const SPAM_KINDS = new Set<CardKind>(['steamed', 'review', 'protected', 'media_unverified', 'edit_lowered', 'target_admin', 'delete_denied', 'no_rights', 'op_failed'])
+export const SPAM_KINDS = new Set<CardKind>(['steamed', 'review', 'flagged', 'protected', 'media_unverified', 'edit_lowered', 'target_admin', 'delete_denied', 'no_rights', 'op_failed'])
 
 export interface MessageState {
   inChat: boolean
@@ -131,7 +136,6 @@ export function allowedActions(card: CardRow, state: MessageState): CardAction[]
   if ((card.status ?? 'open') !== 'open' || card.payload.noActions === true) return []
   if (card.kind === 'spam_command') return ['restore']
   if (card.kind === 'report') return ['confirm', 'return']
-  if (card.kind === 'appeal_review') return ['unban', 'ban']
   if (card.kind === 'unban_request') return state.sanctioned ? ['unban', 'keep'] : []
   if (!SPAM_KINDS.has(card.kind) || (FAILURE_KINDS.has(card.kind) && card.payload.messageId == null)) return []
   return spamActions(state)

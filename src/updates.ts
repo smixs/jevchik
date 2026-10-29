@@ -12,6 +12,7 @@ import { handleReaction, handleReactionCount } from './reactions.js'
 import { isReportCommand, startReport } from './report.js'
 import { getSettings, type SettingsView } from './settings/settings.js'
 import { isSpamCommand, startSpamCommand } from './spam-command.js'
+import { hasSpamPhrase, namesStopWord } from './stop-phrases.js'
 import { contentHash, makeExcerpt, truncateGraphemes } from './text.js'
 
 type Post = () => Promise<void>
@@ -26,6 +27,11 @@ function textOf(msg: Message): string {
 function hasLinks(msg: Message): boolean {
   const entities = [...(msg.entities ?? []), ...(msg.caption_entities ?? [])]
   return entities.some((e) => e.type === 'url' || e.type === 'text_link') || LINK.test(textOf(msg))
+}
+
+function hasStopWord(msg: Message): boolean {
+  const entities = [...(msg.entities ?? []), ...(msg.caption_entities ?? [])]
+  return namesStopWord(textOf(msg), entities.flatMap((e) => (e.type === 'text_link' ? [e.url] : [])))
 }
 
 function mediaOf(msg: Message): MediaRef | null {
@@ -163,6 +169,8 @@ function metaFor(e: Enqueue, gen: number): EvalMeta {
     mediaKind: media?.kind ?? null,
     mediaOnly: Boolean(media) && !textOf(msg),
     hasLinks: hasLinks(msg),
+    stopWord: hasStopWord(msg),
+    spamPhrase: hasSpamPhrase(textOf(msg)),
     probation: e.probation,
     fetchBio: e.isFirst && !e.isEdit && !author.isChannel,
     mode: 'live',
@@ -288,7 +296,7 @@ async function route(ctx: Ctx, q: Q, update: Update, posts: Post[]): Promise<voi
     const r = update.message_reaction
     if (!GROUP_TYPES.has(r.chat.type)) return
     await ensureChat(q, r.chat, now)
-    await handleReaction(q, await getSettings(q, r.chat.id), r, now)
+    await handleReaction(q, await getSettings(q, r.chat.id), r, now, ctx.rng)
   } else if (update.message_reaction_count) {
     const r = update.message_reaction_count
     await handleReactionCount(q, await getSettings(q, r.chat.id), r, now)

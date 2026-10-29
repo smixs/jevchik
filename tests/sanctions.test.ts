@@ -147,14 +147,14 @@ describe('"cannot tell whether the target is an administrator" is not "not an ad
   })
 })
 
-describe('an accepted or started appeal cancels the transition to the ban', () => {
+describe('an accepted appeal cancels the transition to the ban', () => {
   async function steamed(): Promise<void> {
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
     await h.app.settle()
     h.tg.calls.length = 0
   }
 
-  it.each(['accepted', 'evaluating'])('a ban flow created earlier does not ban when the appeal is %s', async (status) => {
+  it.each(['accepted'])('a ban flow created earlier does not ban when the appeal is %s', async (status) => {
     await steamed()
     const ban = (await h.db.query('SELECT ban_id FROM bans'))[0]
     await h.db.query(`UPDATE bans SET appeal_status = $1`, [status])
@@ -195,8 +195,7 @@ describe('a missing getChat.permissions is not an outage', () => {
     await h.app.settle()
     h.tg.chatInfo = {}
     const { submitAppeal } = await import('../src/appeal.js')
-    h.jev.script('Я человек, пришёл за советами', { appeal_genuine: 0.95 })
-    expect(await submitAppeal(h.ctx, CHAT, CAROL.id, 'Я человек, пришёл за советами')).toEqual({ status: 'accepted', lifted: true })
+    expect(await submitAppeal(h.ctx, CHAT, CAROL.id)).toEqual({ status: 'accepted', lifted: true })
     expect(h.tg.of('restrictChatMember').at(-1)!.args[2]).toEqual(DEFAULT_PERMISSIONS)
   })
 

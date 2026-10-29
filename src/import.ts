@@ -279,7 +279,7 @@ interface Item {
 }
 
 function importMeta(m: ImportMessage): EvalMeta {
-  return { authorId: m.authorId, authorName: m.author, postedAt: m.postedAt.toISOString(), gen: 0, isEdit: false, mediaKind: null, mediaOnly: false, hasLinks: false, probation: false, fetchBio: false, mode: 'import' }
+  return { authorId: m.authorId, authorName: m.author, postedAt: m.postedAt.toISOString(), gen: 0, isEdit: false, mediaKind: null, mediaOnly: false, hasLinks: false, stopWord: false, spamPhrase: false, probation: false, fetchBio: false, mode: 'import' }
 }
 
 async function processOne(env: Env, item: Item): Promise<void> {

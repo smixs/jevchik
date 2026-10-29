@@ -39,6 +39,27 @@ export async function isNewcomer(q: Q, member: { chatId: number; userId: number;
   // Whoever was in the chat before the bot came is not a newcomer, however few of their messages the bot knows.
   const seen = await q.query('SELECT 1 FROM members WHERE chat_id = $1 AND user_id = $2 AND joined_seen_at IS NOT NULL', [member.chatId, member.userId])
   if (seen.length === 0) return false
+  return isEarly(q, member, limit)
+}
+
+/**
+ * Section 3.6.0: a silent member. The bot did not see them join, but the imported history of the chat does not know them
+ * either: their row appeared after an import was finished. Such a member is judged by the text of the first `limit` messages
+ * like a newcomer; the profile rule stays for those the bot saw joining. Without a finished import nobody is silent: the bot
+ * cannot tell a sleeping account from a member of many years.
+ */
+export async function isSilent(q: Q, member: { chatId: number; userId: number; upTo: number | null }, limit: number): Promise<boolean> {
+  const rows = await q.query(
+    `SELECT 1 FROM members m WHERE m.chat_id = $1 AND m.user_id = $2 AND m.joined_seen_at IS NULL
+       AND EXISTS (SELECT 1 FROM import_jobs j WHERE j.chat_id = m.chat_id AND j.status = 'done' AND j.finished_at < m.created_at)`,
+    [member.chatId, member.userId],
+  )
+  return rows.length > 0 && isEarly(q, member, limit)
+}
+
+/** Section 3.6.6: the same count of messages as for a newcomer, whether or not the bot saw the member join. */
+export async function isEarly(q: Q, member: { chatId: number; userId: number; upTo: number | null }, limit: number): Promise<boolean> {
+  if (limit === 0) return true
   const rows = await q.query<{ n: number }>(
     'SELECT count(*)::int AS n FROM messages WHERE chat_id = $1 AND author_id = $2 AND ($3::bigint IS NULL OR message_id <= $3)',
     [member.chatId, member.userId, member.upTo],

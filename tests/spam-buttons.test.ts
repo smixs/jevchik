@@ -21,7 +21,7 @@ beforeEach(async () => {
   h.tg.admins = [{ user_id: ADMIN.id, is_bot: false }]
   h.tg.members.set(ADMIN.id, 'administrator')
   h.jev.script(SPAM, { spam_earnings_crypto: 0.98 })
-  h.jev.script(MILD, { spam_other_offer: 0.6 })
+  h.jev.script(MILD, { spam_other_offer: 0.5 })
   await pastObservation(h)
 })
 afterEach(async () => {
@@ -45,7 +45,7 @@ function card(head: string[], quote: string, id: number): { text: string; entiti
 }
 
 const STEAMED = card(['Удалил спам и заглушил автора', 'Участник: Carol', 'Категория: Лёгкие деньги и крипта', 'Уверенность: 98%'], SPAM, 700)
-const REVIEW = card(['Похоже на спам, реши', 'Участник: Carol', 'Категория: Навязчивая реклама', 'Уверенность: 60%'], MILD, 701)
+const REVIEW = card(['Похоже на спам, реши', 'Участник: Carol', 'Категория: Навязчивая реклама', 'Уверенность: 50%'], MILD, 701)
 
 async function cardId(): Promise<number> {
   return Number((await h.db.query('SELECT card_id FROM admin_cards ORDER BY card_id DESC LIMIT 1'))[0].card_id)
@@ -78,7 +78,7 @@ async function press(id: number, action: string, from: User = ADMIN, cb = 'cb1')
 }
 
 describe('F30: automatic deletion (section 3.6.2)', () => {
-  it('a newcomer at or above 0.90: deleted, steam room, and the card "Удалил спам и заглушил автора" with its buttons', async () => {
+  it('a newcomer at or above 0.60: deleted, steam room, and the card "Удалил спам и заглушил автора" with its buttons', async () => {
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
     await h.app.settle()
     const id = await cardId()
@@ -104,10 +104,10 @@ describe('F30: automatic deletion (section 3.6.2)', () => {
     expect(await h.db.query('SELECT kind FROM admin_cards')).toEqual([{ kind: 'steamed' }])
   })
 
-  it('applies to any newcomer message, not only the first; exactly 0.90 counts, 0.89 only asks', async () => {
+  it('applies to any newcomer message, not only the first; exactly 0.60 counts, 0.59 only asks', async () => {
     await h.send(message({ id: 600, from: CAROL, text: 'обычное первое сообщение' }))
-    h.jev.script('почти', { spam_other_offer: 0.89 })
-    h.jev.script('ровно', { spam_other_offer: 0.9 })
+    h.jev.script('почти', { spam_other_offer: 0.59 })
+    h.jev.script('ровно', { spam_other_offer: 0.6 })
     await h.send(message({ id: 701, from: CAROL, text: 'почти' }))
     await h.send(message({ id: 702, from: CAROL, text: 'ровно' }))
     await h.app.settle()
@@ -173,7 +173,7 @@ describe('F30: the buttons of a spam card and the answer of the bot (section 3.6
       h = await createHarness()
       h.tg.admins = [{ user_id: ADMIN.id, is_bot: false }]
       h.tg.members.set(ADMIN.id, 'administrator')
-      h.jev.script(MILD, { spam_other_offer: 0.6 })
+      h.jev.script(MILD, { spam_other_offer: 0.5 })
       await pastObservation(h)
       const id = await reviewCard()
       h.tg.members.set(CAROL.id, status)
@@ -303,7 +303,7 @@ describe('F30: the buttons of a spam card and the answer of the bot (section 3.6
     h = await createHarness()
     h.tg.admins = [{ user_id: ADMIN.id, is_bot: false }]
     h.tg.members.set(ADMIN.id, 'administrator')
-    h.jev.script(MILD, { spam_other_offer: 0.6 })
+    h.jev.script(MILD, { spam_other_offer: 0.5 })
     await h.send(botJoined())
     const id = await reviewCard()
     await press(id, 'ban')

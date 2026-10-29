@@ -19,7 +19,7 @@ describe('F2: one message, one evaluation, one wire request', () => {
     await h.send(message({ id: 501, text: 'Привет, кто пробовал jev?' }))
     await h.app.settle()
     expect(h.jev.requests).toHaveLength(1)
-    const { appeal_genuine: _appeal, media_fits: _media, ...asked } = questions
+    const { media_fits: _media, ...asked } = questions
     expect(h.jev.requests[0]).toEqual({
       state: {
         message: 'Привет, кто пробовал jev?',

@@ -258,6 +258,13 @@
       "maximum": 1
     },
     {
+      "name": "report_reaction_emoji",
+      "type": "string",
+      "default": "🖕",
+      "nullable": false,
+      "maxLength": 64
+    },
+    {
       "name": "bot_reaction_emoji",
       "type": "string",
       "default": "🔥",
@@ -268,7 +275,7 @@
     {
       "name": "spam_auto_threshold",
       "type": "number",
-      "default": 0.9,
+      "default": 0.6,
       "nullable": false,
       "minimum": 0,
       "maximum": 1
@@ -338,22 +345,6 @@
       "maximum": 1
     },
     {
-      "name": "appeal_accept",
-      "type": "number",
-      "default": 0.7,
-      "nullable": false,
-      "minimum": 0,
-      "maximum": 1
-    },
-    {
-      "name": "appeal_reject",
-      "type": "number",
-      "default": 0.3,
-      "nullable": false,
-      "minimum": 0,
-      "maximum": 1
-    },
-    {
       "name": "punish_media_karma",
       "type": "number",
       "default": -10,
@@ -400,6 +391,14 @@
       "nullable": false,
       "minimum": 1,
       "maximum": 1000
+    },
+    {
+      "name": "report_steam_karma",
+      "type": "number",
+      "default": 5,
+      "nullable": false,
+      "minimum": 0,
+      "maximum": 1000000
     },
     {
       "name": "dialog_window_hours",
@@ -506,7 +505,6 @@
   "invariants": [
     "spam_review_threshold <= spam_review_delete_threshold",
     "spam_review_delete_threshold <= spam_auto_threshold",
-    "appeal_reject <= appeal_accept",
     "punish_mute_week_karma <= punish_mute_day_karma",
     "punish_mute_day_karma <= punish_media_karma"
   ]

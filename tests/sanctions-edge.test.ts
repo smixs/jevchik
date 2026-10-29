@@ -7,7 +7,6 @@ import { DEFAULT_PERMISSIONS, tgError } from './support/fakes.js'
 import { ADMIN, ALICE, CAROL, CHAT, createHarness, message, pastObservation, type Harness } from './support/harness.js'
 
 const SPAM = 'Заработай 500 долларов в день без вложений, пиши в личку!'
-const HUMAN = 'Я живой человек, ошибся'
 const MINUTE = 60_000
 const HOUR = 3_600_000
 const FAILED_CARD = 'Не смог выполнить действие в Telegram, подробности на экране админа'
@@ -17,7 +16,6 @@ beforeEach(async () => {
   h = await createHarness()
   h.tg.admins = [{ user_id: ADMIN.id, is_bot: false }]
   h.jev.script(SPAM, { spam_earnings_crypto: 0.95 })
-  h.jev.script(HUMAN, { appeal_genuine: 0.95 })
   await pastObservation(h)
 })
 afterEach(async () => {
@@ -37,7 +35,7 @@ async function spin(times: number, stepMs: number): Promise<void> {
 
 // ---------------------------------------------------------------- D4
 
-describe('a ban operation waiting for a retry is cancelled by an accepted or started appeal', () => {
+describe('a ban operation waiting for a retry is cancelled by an accepted appeal', () => {
   /** Steam room for Carol, the steam time runs out, the first banChatMember gets 502 and waits for a retry. */
   async function banWaitingForRetry(): Promise<string> {
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
@@ -50,9 +48,9 @@ describe('a ban operation waiting for a retry is cancelled by an accepted or sta
     return (await h.db.query('SELECT ban_id FROM bans'))[0].ban_id
   }
 
-  it('appeal accepted and lifted while the ban waits: the retry does not call banChatMember', async () => {
+  it('appeal accepted while the ban waits: the retry does not call banChatMember, then the button lifts (model Appeal)', async () => {
     await banWaitingForRetry()
-    expect(await submitAppeal(h.ctx, CHAT, CAROL.id, HUMAN)).toEqual({ status: 'accepted', lifted: true })
+    expect(await submitAppeal(h.ctx, CHAT, CAROL.id)).toEqual({ status: 'accepted', lifted: false })
     await spin(10, MINUTE)
     expect(memberCalls()).toEqual([
       ['banChatMember', CHAT, CAROL.id],
@@ -66,7 +64,7 @@ describe('a ban operation waiting for a retry is cancelled by an accepted or sta
     expect(cards()).toEqual([])
   })
 
-  it.each(['accepted', 'evaluating'])('appeal %s while the ban waits: no ban, the record stays in the steam room', async (status) => {
+  it.each(['accepted'])('appeal %s while the ban waits: no ban, the record stays in the steam room', async (status) => {
     await banWaitingForRetry()
     await h.db.query(`UPDATE bans SET appeal_status = $1, appeal_claimed_at = $2`, [status, h.clock.now()])
     await spin(10, MINUTE)
@@ -94,7 +92,7 @@ describe('a ban operation waiting for a retry is cancelled by an accepted or sta
       [CHAT, `ban:${banId}:ban`, JSON.stringify({ userId: CAROL.id, banId }), now],
     )
     h.tg.calls.length = 0
-    expect(await submitAppeal(h.ctx, CHAT, CAROL.id, HUMAN)).toEqual({ status: 'accepted', lifted: true })
+    expect(await submitAppeal(h.ctx, CHAT, CAROL.id)).toEqual({ status: 'accepted', lifted: false })
     await spin(10, MINUTE)
     h.clock.advance(HOUR)
     await h.app.settle()
@@ -103,6 +101,29 @@ describe('a ban operation waiting for a retry is cancelled by an accepted or sta
     expect(await h.db.query(`SELECT status, last_error_code FROM operations WHERE operation_kind = 'ban'`)).toEqual([
       { status: 'failed', last_error_code: 'cancelled' },
     ])
+  })
+
+  it('T-appeal-ban-in-flight (model Appeal, NoHiddenBan): the ban reached Telegram, the record is not written yet: the button waits, then unbans', async () => {
+    await h.send(message({ id: 700, from: CAROL, text: SPAM }))
+    await h.app.settle()
+    const banId = (await h.db.query('SELECT ban_id FROM bans'))[0].ban_id
+    h.clock.advance(24 * HOUR + 1_000)
+    const now = h.clock.now()
+    await h.db.query(
+      `INSERT INTO flows (chat_id, kind, idempotency_key, data, step, status, next_attempt_at, created_at) VALUES ($1,'ban',$2,$3,2,'running',$4,$5)`,
+      [CHAT, `ban:${banId}`, JSON.stringify({ userId: CAROL.id, banId }), new Date(now.getTime() + HOUR), now],
+    )
+    await h.db.query(
+      `INSERT INTO operations (chat_id, operation_kind, idempotency_key, payload, status, next_attempt_at, claimed_at, completed_at, created_at)
+       VALUES ($1,'ban',$2,$3,'completed',$4,$4,$4,$4)`,
+      [CHAT, `ban:${banId}:ban`, JSON.stringify({ userId: CAROL.id, banId }), now],
+    )
+    h.tg.calls.length = 0
+    expect(await submitAppeal(h.ctx, CHAT, CAROL.id)).toEqual({ status: 'accepted', lifted: false })
+    expect(memberCalls()).toEqual([])
+    await spin(3, HOUR)
+    expect(memberCalls()).toEqual([['unbanChatMember', CHAT, CAROL.id]])
+    expect(await h.db.query('SELECT 1 FROM bans')).toEqual([])
   })
 
   it('without an appeal the retry bans and the record becomes banned', async () => {

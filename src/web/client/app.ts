@@ -454,20 +454,15 @@ async function bansScreen(): Promise<Child[]> {
 }
 
 const APPEAL_TEXT: Record<string, string> = {
-  rejected: 'Объяснение не убедило. Попытка была одна.',
-  review: 'Объяснение передано админам, ждите решения.',
+  rejected: 'Разбан через приложение недоступен.',
   not_allowed: 'Повторное попадание в баню: разбан через приложение недоступен.',
   no_ban: 'Вас нет в бане.',
-  pending: 'Объяснение уже проверяется.',
-  try_later: 'Не получилось, попробуйте позже.',
 }
 
-/** Each answer to the appeal feels different; only a lifted ban is celebrated. */
+/** Each answer to the button feels different; only a lifted ban is celebrated. */
 function appealFeel(status: string, lifted: boolean, button: HTMLElement, result: HTMLElement): void {
   if (status === 'accepted') return lifted ? juice.appealLifted(button, result) : juice.appealAccepted(result)
-  if (status === 'rejected' || status === 'not_allowed') return juice.appealRefused(result)
-  if (status === 'try_later') return juice.failed(result)
-  juice.appealWaiting(result)
+  juice.appealRefused(result)
 }
 
 const REQUEST_TEXT: Record<string, string> = {
@@ -499,33 +494,29 @@ function requestScreen(state: Dict): Child[] {
   return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, h('p', { 'data-field': 'sanction' }, `Вы ${s(state.sanction)}.`), h('p', { class: 'hint' }, 'Это решение админа. Снять его может только админ; попросить можно один раз.'), asked ? h('p', { 'data-field': 'appeal_state' }, REQUEST_TEXT[s(state.status)] ?? 'Просьба недоступна.') : ask, result)]
 }
 
+/** Section 3.6: one button lifts the automatic sanction, nothing to explain. */
 async function appealScreen(): Promise<Child[]> {
   const state = await api('/api/appeal')
   if (state.source === 'admin') return requestScreen(state)
   const result = h('p', { 'data-field': 'appeal_result', role: 'status' })
-  const area = h('textarea', { maxlength: '500', rows: '5', 'aria-label': 'Объяснение', hidden: '' })
-  const send = h('button', { class: 'primary', hidden: '' }, 'Отправить')
-  const start = h('button', { class: 'primary', 'data-action': 'human' }, 'Я человек')
-  start.addEventListener('click', () => {
-    area.removeAttribute('hidden')
-    send.removeAttribute('hidden')
-    start.setAttribute('hidden', '')
-  })
+  const send = h('button', { class: 'primary', 'data-action': 'unban' }, 'Разбанить меня')
   send.addEventListener('click', () => {
-    const text = (area as HTMLTextAreaElement).value
-    void api('/api/appeal', { method: 'POST', body: JSON.stringify({ text }) })
+    send.setAttribute('disabled', '')
+    void api('/api/appeal', { method: 'POST' })
       .then((r) => {
         const status = s(r.status)
-        result.textContent = status === 'accepted' ? (r.lifted ? 'Готово, ограничение снято. Первые сообщения проверяются строже.' : 'Принято. Снятие ограничения не прошло, нажмите ещё раз позже.') : (APPEAL_TEXT[status] ?? 'Готово.')
+        const retry = status === 'accepted' && r.lifted !== true
+        result.textContent = status === 'accepted' ? (retry ? 'Принято, ограничение снимается. Если через минуту не снято, нажмите ещё раз.' : 'Готово, ограничение снято. Первые сообщения проверяются строже.') : (APPEAL_TEXT[status] ?? 'Готово.')
+        if (retry) send.removeAttribute('disabled')
         appealFeel(status, r.lifted === true, send, result)
       })
-      .catch((error: unknown) => {
-        result.textContent = error instanceof ApiError && error.status === 422 ? 'Напишите от 1 до 500 знаков.' : 'Не получилось, попробуйте позже.'
+      .catch(() => {
+        result.textContent = 'Не получилось, попробуйте позже.'
+        send.removeAttribute('disabled')
         juice.failed(result)
       })
   })
-  const blocked = state.status !== 'none' || state.allowed === false
-  return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, h('p', { class: 'hint' }, 'Одна попытка. Своими словами: почему вы в этом чате и что произошло.'), blocked ? h('p', { 'data-field': 'appeal_state' }, APPEAL_TEXT[s(state.status)] ?? 'Разбан недоступен.') : start, area, send, result)]
+  return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, state.allowed === false ? h('p', { 'data-field': 'appeal_state' }, APPEAL_TEXT[s(state.status)] ?? 'Разбан недоступен.') : send, result)]
 }
 
 // ---------------------------------------------------------------- admin

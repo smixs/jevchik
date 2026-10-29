@@ -52,6 +52,48 @@ describe('a member who was in the chat before the bot came', () => {
   })
 })
 
+describe('a silent member: no join seen, and the imported history does not know them', () => {
+  const imported = (at: Date): Promise<unknown> => h.db.query(`INSERT INTO import_jobs (chat_id, status, created_at, finished_at) VALUES ($1,'done',$2,$2)`, [CHAT, at])
+
+  beforeEach(async () => {
+    h.oldTimers.add(OLD.id)
+    await imported(h.clock.now())
+    h.clock.advance(3_600_000)
+  })
+
+  it('the first message with spam 0.99 is deleted and the author is restricted, like a newcomer', async () => {
+    h.jev.script(SPAM, { spam_earnings_crypto: 0.99 })
+    await h.send(message({ id: 810, from: OLD, text: SPAM }))
+    await h.app.settle()
+    expect(sanctions()).toEqual(['deleteMessage', 'restrictChatMember'])
+  })
+
+  it('a score for a card gives a card; a promotional profile alone gives nothing', async () => {
+    h.jev.script(SPAM, { spam_earnings_crypto: 0.5, profile_promo: 0.99 })
+    await h.send(message({ id: 811, from: OLD, text: SPAM }))
+    await h.app.settle()
+    expect(sanctions()).toEqual([])
+    expect(await cards()).toBe(1)
+  })
+
+  it('a member the history knows (the row is older than the import) is not judged', async () => {
+    await h.db.query(`INSERT INTO members (chat_id, user_id, display_name, created_at) VALUES ($1,$2,'Olga',$3)`, [CHAT, OLD.id, new Date(h.clock.now().getTime() - 7_200_000)])
+    h.jev.script(SPAM, { spam_earnings_crypto: 0.99 })
+    await h.send(message({ id: 812, from: OLD, text: SPAM }))
+    await h.app.settle()
+    expect(sanctions()).toEqual([])
+    expect(await cards()).toBe(0)
+  })
+
+  it('after the first messages the silent member is a member like any other', async () => {
+    for (let i = 0; i < 5; i++) await h.send(message({ id: 820 + i, from: OLD, text: `обычное сообщение ${i}` }))
+    h.jev.script(SPAM, { spam_earnings_crypto: 0.99 })
+    await h.send(message({ id: 830, from: OLD, text: SPAM }))
+    await h.app.settle()
+    expect(sanctions()).toEqual([])
+  })
+})
+
 describe('migration 011: joins the bot saw before the column existed', () => {
   it('a member row made by a membership update after the chat was connected gets the mark; an old member does not', async () => {
     const connected = (await h.db.query('SELECT created_at FROM chats WHERE chat_id = $1', [CHAT]))[0].created_at as Date

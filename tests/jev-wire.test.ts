@@ -70,7 +70,7 @@ describe('the Jev request on the wire', () => {
     expect(server!.seen).toHaveLength(1)
     const seen = server!.seen[0]
     expect([seen.method, seen.url, seen.headers.authorization, seen.headers['content-type']]).toEqual(['POST', '/v1/systemone', 'Bearer KEY-1', 'application/json'])
-    const { appeal_genuine: _a, media_fits: _m, ...asked } = questions
+    const { media_fits: _m, ...asked } = questions
     expect(JSON.parse(seen.body)).toEqual({
       state: {
         message: 'привет',
@@ -100,7 +100,7 @@ describe('the Jev request on the wire', () => {
     for (const [id, from, text] of lines) await h.send(message({ id, from, text, date: '2026-08-30T10:00:00Z' }))
     await h.send(message({ id: 20, from: ALICE, text: 'итог', reply_to: { message_id: 18, from: CAROL, text: 'девять' } }))
     await h.app.settle()
-    const { appeal_genuine: _a, media_fits: _m, profile_promo: _p, ...asked } = questions
+    const { media_fits: _m, profile_promo: _p, ...asked } = questions
     expect(JSON.parse(server!.seen.at(-1)!.body)).toEqual({
       state: {
         message: 'итог',

@@ -93,14 +93,14 @@ describe('F27: the card text and buttons, literally', () => {
     expect(card.buttons).toEqual([open('https://t.me/agents_chat/701'), inChatButtons(card.id)])
   })
 
-  it('review card from 0.60: rule 4 is cancelled, the message stays and admins are asked', async () => {
+  it('review card at 0.50 (below the 0.60 threshold): rule 4 is cancelled, the message stays and admins are asked', async () => {
     await pastObservation(h)
     await h.send(message({ id: 600, from: CAROL, text: 'обычное первое сообщение' }))
-    h.jev.script(MILD, { spam_channel_bait: 0.6 })
+    h.jev.script(MILD, { spam_channel_bait: 0.5 })
     await h.send(message({ id: 701, from: CAROL, text: MILD }))
     await h.app.settle()
     const card = await onlyCard()
-    const head = ['Похоже на спам, реши', 'Участник: Carol', 'Категория: Заманивание в канал', 'Уверенность: 60%']
+    const head = ['Похоже на спам, реши', 'Участник: Carol', 'Категория: Заманивание в канал', 'Уверенность: 50%']
     expect(card.text).toBe([...head, MILD, 'Ссылка: https://t.me/c/1234567890/701'].join('\n'))
     expect(card.buttons).toEqual([open(NO_NAME_LINK(701)), inChatButtons(card.id)])
   })

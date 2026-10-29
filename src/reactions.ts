@@ -1,9 +1,11 @@
 import type { MessageReactionCountUpdated, MessageReactionUpdated, ReactionType } from 'grammy/types'
 import { DAY_MS } from './ctx.js'
 import type { Q } from './db.js'
+import type { Rng } from './ports.js'
 import { messageFactor, reactionDelta, round4 } from './formulas.js'
 import { award, boostFor } from './karma.js'
 import { ensureChat, getKarma, upsertMember } from './members.js'
+import { startFlagByReaction } from './report.js'
 import type { SettingsView } from './settings/settings.js'
 
 export type ReactionClass = 'plus' | 'minus' | 'ignore'
@@ -14,9 +16,14 @@ function reactionKey(reaction: ReactionType): string {
   return 'paid'
 }
 
+/** Section 3.7: the emoji that reports a message as spam; empty means the sign is off. */
+export function reportEmoji(settings: SettingsView): string | null {
+  return settings.str('report_reaction_emoji') || null
+}
+
 export function classify(settings: SettingsView, key: string): ReactionClass {
   const plain = key.startsWith('emoji:') ? key.slice(6) : key
-  if (settings.list('reactions_ignore').includes(plain)) return 'ignore'
+  if (settings.list('reactions_ignore').includes(plain) || plain === reportEmoji(settings)) return 'ignore'
   if (settings.list('reactions_minus').includes(plain)) return 'minus'
   return 'plus'
 }
@@ -143,7 +150,7 @@ function actorOf(update: MessageReactionUpdated, target: Target): { kind: 'user'
   return actor && actor.id !== target.authorId ? actor : null
 }
 
-export async function handleReaction(q: Q, settings: SettingsView, update: MessageReactionUpdated, now: Date): Promise<void> {
+export async function handleReaction(q: Q, settings: SettingsView, update: MessageReactionUpdated, now: Date, rng: Rng): Promise<void> {
   const chatId = update.chat.id
   const target = await findMessage(q, chatId, update.message_id)
   if (!target) return
@@ -158,6 +165,16 @@ export async function handleReaction(q: Q, settings: SettingsView, update: Messa
     const cls = classify(settings, type)
     if (!oldKeys.has(type) && cls !== 'ignore') await addReaction(rc, type, cls)
   }
+  await flagByReaction(rc, update, oldKeys, newKeys, rng)
+}
+
+/** Section 3.7: the report emoji just added by a person (not by a bot, not on behalf of a chat) flags the message. */
+async function flagByReaction(rc: ReactionCtx, update: MessageReactionUpdated, oldKeys: Set<string>, newKeys: Set<string>, rng: Rng): Promise<void> {
+  const emoji = reportEmoji(rc.settings)
+  if (!emoji || !update.user || update.user.is_bot) return
+  const key = `emoji:${emoji}`
+  if (!newKeys.has(key) || oldKeys.has(key)) return
+  await startFlagByReaction(rc.q, { chatId: rc.chatId, messageId: rc.messageId, flaggerId: update.user.id, settings: rc.settings, now: rc.now, rng })
 }
 
 interface CountArgs {

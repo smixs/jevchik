@@ -6,7 +6,7 @@ import type { Q, Row } from './db.js'
 import { registerFlow, startFlowNow, withReport, type Flow, type StepResult } from './flows.js'
 import { isChannelId } from './members.js'
 import { execOp, NO_PERMISSIONS } from './ops.js'
-import { appealUrl, banCall, checkTarget, closeRequests, dropJokes, liftStep, loadJokes, unbanRecord } from './sanctions.js'
+import { appealUrl, banCall, checkTarget, closeRequests, dropJokes, liftStep, loadJokes, SANCTION_FLOWS, unbanRecord } from './sanctions.js'
 import { getSettings } from './settings/settings.js'
 
 // Section 3.6.5: an administrator of the chat sanctions a member from the Mini App: the steam room for an hour, a day or a
@@ -153,9 +153,6 @@ function refusal(req: ModRequest, ban: Row | undefined): string | null {
   if (req.action === 'steam' && !STEAM_HOURS.includes(req.hours ?? 0)) return 'Срок парилки: час, сутки или неделя.'
   return null
 }
-
-/** Every flow that changes the sanction of a member: while one runs, an administrator waits. */
-const SANCTION_FLOWS = ['app_steam', 'app_ban', 'app_unban', 'steam', 'ban', 'unban', 'admin_ban', 'card_spam', 'card_ban', 'card_restore', 'card_unban', 'card_unsanction']
 
 async function busy(q: Q, chatId: number, userId: number): Promise<boolean> {
   const rows = await q.query(`SELECT 1 FROM flows WHERE chat_id = $1 AND kind = ANY($3) AND status = 'running' AND data->>'userId' = $2`, [chatId, String(userId), SANCTION_FLOWS])

@@ -4,14 +4,14 @@ import type { Q } from './db.js'
 import { categoryOf } from './categories.js'
 import { createCard, holdText, LEFT_IN_CHAT, type CardKind, type HeldText } from './cards.js'
 import { extractFacts, type Answers, type Facts } from './jev/facts.js'
-import { isNewcomer } from './jev/history.js'
+import { isEarly, isNewcomer, isSilent } from './jev/history.js'
 import { award, boostFor, recordActivity } from './karma.js'
 import { pickSignal, settleLink } from './ladder.js'
 import { isObserving } from './members.js'
 import { seriesFactor } from './formulas.js'
 import { submitOpIn } from './ops.js'
 import { getSettings, type SettingsView } from './settings/settings.js'
-import { decide, startSpamDelete, startSteam, type Action, type DecideInput, type Decision } from './sanctions.js'
+import { alreadySteamed, decide, startSpamDelete, startSteam, type Action, type DecideInput, type Decision, type SpamFlowData } from './sanctions.js'
 
 export interface EvalMeta {
   authorId: number
@@ -22,6 +22,10 @@ export interface EvalMeta {
   mediaKind: 'photo' | 'sticker' | 'animation' | null
   mediaOnly: boolean
   hasLinks: boolean
+  /** Section 3.6.6: the message names the stop word. */
+  stopWord: boolean
+  /** Section 3.6.7: the message has a phrase of hand-removed spam; absent in evaluations queued before 29.10. */
+  spamPhrase?: boolean
   probation: boolean
   fetchBio: boolean
   prepared?: boolean
@@ -59,6 +63,8 @@ interface Env {
   facts: Facts
   msg: MessageRow
   postedAt: Date
+  /** Section 3.6.6: set by moderation when the stop word rule applies to this message. */
+  stopWord: boolean
 }
 
 /** An imported event is dated by its message, so that the week and month boards count it where it happened. */
@@ -145,7 +151,7 @@ function score(facts: Facts): number | null {
   return pickCategory(facts) === 'profile_promo' && facts.profilePromo !== null ? facts.profilePromo : facts.spam
 }
 
-function flowData(e: Env, category: string): { userId: number; messageId: number; name: string; sentAt: string; category: string; spam: number | null } {
+function flowData(e: Env, category: string): SpamFlowData {
   return {
     userId: e.msg.author_id,
     messageId: e.input.messageId,
@@ -158,6 +164,14 @@ function flowData(e: Env, category: string): { userId: number; messageId: number
 
 function pickCategory(facts: Facts): string {
   return categoryOf(facts) ?? 'profile_promo'
+}
+
+/** Section 3.6.6: what the bot says instead of a joke when the stop word sends a member to the steam room. */
+const STOP_WORD_REPLY = 'тут был Стас пидорас'
+
+/** The steam room of the stop word has its own category and reply; any other one goes by the answers of Jev. */
+function steamData(e: Env): SpamFlowData {
+  return e.stopWord ? { ...flowData(e, 'spam_channel_bait'), reply: STOP_WORD_REPLY } : flowData(e, pickCategory(e.facts))
 }
 
 /** Section 3.6.1: the text at the moment of moderation is kept for the card by the rule for deleted spam. */
@@ -179,14 +193,6 @@ async function card(e: Env, kind: CardKind, key: string, extra: { done?: string 
   })
 }
 
-/** A member already in the bath, or on the way there (T-steam-race): one record, one restriction, one joke. */
-async function alreadySteamed(e: Env): Promise<boolean> {
-  const params = [e.input.chatId, e.msg.author_id]
-  if ((await e.q.query('SELECT 1 FROM bans WHERE chat_id = $1 AND user_id = $2', params)).length > 0) return true
-  const flows = await e.q.query(`SELECT 1 FROM flows WHERE chat_id = $1 AND kind = 'steam' AND status = 'running' AND (data->>'userId')::bigint = $2`, params)
-  return flows.length > 0
-}
-
 async function perform(e: Env, action: Action): Promise<string | null> {
   const { input } = e
   const now = e.ctx.clock.now()
@@ -196,11 +202,11 @@ async function perform(e: Env, action: Action): Promise<string | null> {
       return 'card'
     case 'steam':
       await saveHeldText(e)
-      if (await alreadySteamed(e)) {
-        await startSpamDelete(e.q, input.chatId, { ...flowData(e, pickCategory(e.facts)), noCard: true }, now)
+      if (await alreadySteamed(e.q, input.chatId, e.msg.author_id)) {
+        await startSpamDelete(e.q, input.chatId, { ...steamData(e), noCard: true }, now)
         return 'delete'
       }
-      await startSteam(e.q, e.ctx, { ...flowData(e, pickCategory(e.facts)), chatId: input.chatId }, now)
+      await startSteam(e.q, e.ctx, { ...steamData(e), chatId: input.chatId }, now)
       return 'steam'
     case 'delete_card':
       await saveHeldText(e)
@@ -219,8 +225,14 @@ async function memberState(e: Env): Promise<Standing> {
   const { input } = e
   const rows = await e.q.query('SELECT karma, first_message_id FROM members WHERE chat_id = $1 AND user_id = $2', [input.chatId, e.msg.author_id])
   const member = { chatId: input.chatId, userId: e.msg.author_id, upTo: input.meta.isEdit ? null : input.messageId }
-  const newcomer = await isNewcomer(e.q, member, e.settings.num('spam_newcomer_messages'))
-  return { karma: rows[0]?.karma ?? 0, isFirst: rows[0]?.first_message_id === input.messageId, newcomer, judged: newcomer || input.meta.probation }
+  const limit = e.settings.num('spam_newcomer_messages')
+  const newcomer = await isNewcomer(e.q, member, limit)
+  // A silent member (section 3.6.0) is judged by the text only: `newcomer` stays false, so the profile rule does not apply.
+  const judged = newcomer || input.meta.probation || (await isSilent(e.q, member, limit))
+  const karma = rows[0]?.karma ?? 0
+  const flagged = input.meta.stopWord || (input.meta.spamPhrase === true && karma < e.settings.num('protect_threshold'))
+  const early = flagged && (judged || (await isEarly(e.q, member, limit)))
+  return { karma, isFirst: rows[0]?.first_message_id === input.messageId, newcomer, judged, stopWord: early && input.meta.stopWord, spamPhrase: early && !input.meta.stopWord }
 }
 
 interface Standing {
@@ -228,6 +240,10 @@ interface Standing {
   isFirst: boolean
   newcomer: boolean
   judged: boolean
+  /** Section 3.6.6: the message names the stop word and is among the member's first ones (or the member is on probation). */
+  stopWord: boolean
+  /** Section 3.6.7: the same for a phrase of hand-removed spam, unless the karma protects the member. */
+  spamPhrase: boolean
 }
 
 function decideInput(e: Env, member: Standing): DecideInput {
@@ -282,7 +298,9 @@ async function applyDecision(e: Env, decision: Decision, judged: boolean): Promi
 async function moderate(e: Env): Promise<string | null> {
   const { input } = e
   const member = await memberState(e)
-  const decision = decide(decideInput(e, member))
+  e.stopWord = member.stopWord
+  // Sections 3.6.6, 3.6.7: the stop word or a spam phrase in an early message sends the member to the steam room whatever Jev says.
+  const decision: Decision = member.stopWord || member.spamPhrase ? { rule: 0, action: 'steam' } : decide(decideInput(e, member))
   const sanction = await applyDecision(e, decision, member.judged)
   const unverifiedMedia = input.meta.mediaOnly && !input.mediaDescribed && member.newcomer
   if (unverifiedMedia && sanction === null) await card(e, 'media_unverified', `media:${input.messageId}`)
@@ -310,7 +328,7 @@ export async function applyEvaluation(ctx: Ctx, q: Q, input: ApplyInput): Promis
   if (rows.length === 0) return
   const facts = extractFacts(input.answers)
   const msg = rows[0]
-  const e: Env = { q, ctx, settings, input, facts, msg, postedAt: new Date(msg.posted_at) }
+  const e: Env = { q, ctx, settings, input, facts, msg, postedAt: new Date(msg.posted_at), stopWord: false }
   const active = facts.isFlood === null || facts.isFlood < settings.num('threshold_is_flood')
   if (active) await recordActivity(q, { chatId: input.chatId, userId: msg.author_id }, e.postedAt, settings.str('timezone'))
   await updateJevKarma(e)

@@ -73,7 +73,7 @@ function restoreParts(ops: Ops, data: Flow['data']): Parts {
   const parts: Parts = { done: [], failed: [] }
   const lift: [string, string] = data.liftKind === 'banned' ? ['бан снят', 'снять бан не смог'] : ['ограничение снято', 'снять ограничение не смог']
   step(parts, ops.get('lift'), lift)
-  if (data.recordDropped === true) parts.done.push(data.probation === true ? 'запись в бане удалена, испытательный срок назначен' : 'запись в бане удалена')
+  if (data.recordDropped === true) parts.done.push('запись в бане удалена')
   if (data.noText === true) parts.failed.push('вернуть не смог: текста уже нет')
   publishPart(parts, ops.get('publish'))
   return parts
@@ -265,15 +265,17 @@ async function flowData(q: Q, card: CardRow, action: CardAction, state: MessageS
     spam: p.spam ?? null,
     sentAt: msg[0] ? new Date(msg[0].posted_at).toISOString() : undefined,
     inChat: state.inChat,
-    // Probation follows an appeal the bot doubted, not a request to an administrator (section 3.6.5).
-    probation: action === 'unban' && card.kind === 'appeal_review',
     request: card.kind === 'unban_request',
     quiet: true,
   }
 }
 
+/** A flow of this card, or the button of the member lifting their sanction right now (model Appeal, AdminStart). */
 async function busy(q: Q, card: CardRow): Promise<boolean> {
-  const rows = await q.query(`SELECT 1 FROM flows WHERE chat_id = $1 AND idempotency_key LIKE $2 AND status = 'running'`, [card.chat_id, `cardaction:${card.card_id}:%`])
+  const rows = await q.query(
+    `SELECT 1 FROM flows WHERE chat_id = $1 AND status = 'running' AND (idempotency_key LIKE $2 OR (kind = 'unban' AND data->>'userId' = $3))`,
+    [card.chat_id, `cardaction:${card.card_id}:%`, String(card.payload.targetUserId)],
+  )
   return rows.length > 0
 }
 

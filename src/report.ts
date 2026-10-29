@@ -6,7 +6,10 @@ import type { Facts } from './jev/facts.js'
 import type { Q } from './db.js'
 import { createFlow, registerFlow, type Flow, type StepResult } from './flows.js'
 import { authorOf, getKarma, isChannelId, replyOf, type Author } from './members.js'
+import { isNewcomer, isSilent } from './jev/history.js'
 import { execOp, type OpOutcome } from './ops.js'
+import type { Rng } from './ports.js'
+import { alreadySteamed, startSpamDelete, startSteam } from './sanctions.js'
 import { withRetry } from './retry.js'
 import type { SettingsView } from './settings/settings.js'
 
@@ -195,4 +198,93 @@ async function reportCard(ctx: Ctx, flow: Flow): Promise<StepResult> {
 
 export function registerReportFlow(): void {
   registerFlow('report', [adminCheck, deleteCommand, deleteTarget, reportCard])
+}
+
+export interface ReactionFlag {
+  chatId: number
+  messageId: number
+  flaggerId: number
+  settings: SettingsView
+  now: Date
+  rng: Rng
+}
+
+interface FlaggedRow {
+  author_id: number
+  excerpt: string | null
+  media_kind: string | null
+  facts: Facts | null
+  display_name: string
+  karma: number
+  probation_left: number
+  posted_at: Date
+}
+
+/**
+ * Section 3.7: the admins pressed «Спам» on every flagged newcomer with no karma, so such a member
+ * goes to the steam room at once; one with karma, or past the first messages, still waits for the admins.
+ */
+async function steamsAtOnce(q: Q, f: ReactionFlag, row: FlaggedRow): Promise<boolean> {
+  if (Number(row.karma) >= f.settings.num('report_steam_karma')) return false
+  // Counted now, not up to the flagged message: an old early message of a long-time member does not make them a newcomer.
+  const member = { chatId: f.chatId, userId: row.author_id, upTo: null }
+  const limit = f.settings.num('spam_newcomer_messages')
+  return row.probation_left > 0 || (await isNewcomer(q, member, limit)) || (await isSilent(q, member, limit))
+}
+
+async function steamFlagged(q: Q, f: ReactionFlag, row: FlaggedRow): Promise<void> {
+  const text = { chatId: f.chatId, messageId: f.messageId, authorId: row.author_id, authorName: row.display_name, text: row.excerpt ?? '', mediaKind: row.media_kind ?? null }
+  await holdText(q, { ...text, reason: 'spam', days: f.settings.num('held_text_days'), now: f.now })
+  await q.query('UPDATE messages SET excerpt = NULL WHERE chat_id = $1 AND message_id = $2', [f.chatId, f.messageId])
+  const data = {
+    chatId: f.chatId,
+    userId: row.author_id,
+    messageId: f.messageId,
+    name: row.display_name,
+    sentAt: new Date(row.posted_at).toISOString(),
+    category: (row.facts && categoryOf(row.facts)) ?? 'spam_other_offer',
+    spam: row.facts?.spam ?? null,
+    flagger: f.flaggerId,
+  }
+  if (await alreadySteamed(q, f.chatId, row.author_id)) await startSpamDelete(q, f.chatId, { ...data, noCard: true }, f.now)
+  else await startSteam(q, { rng: f.rng }, data, f.now)
+}
+
+/**
+ * Section 3.7: the report emoji on a message of a member sends a judged author with little karma to the steam room; anybody
+ * else waits for the admins. Then the message is not touched and no karma moves: the admins get the card «Участник пожаловался:
+ * похоже на спам, реши» with «Спам» and «Не спам», like the one the model raises. One card per message; a member may flag at
+ * most `report_daily_limit` messages a day.
+ */
+export async function startFlagByReaction(q: Q, f: ReactionFlag): Promise<void> {
+  const rows = await q.query<FlaggedRow>(
+    `SELECT m.author_id, m.excerpt, m.media_kind, m.facts, m.posted_at, mem.display_name, mem.karma, mem.probation_left FROM messages m
+     JOIN members mem ON mem.chat_id = m.chat_id AND mem.user_id = m.author_id WHERE m.chat_id = $1 AND m.message_id = $2 AND NOT m.deleted`,
+    [f.chatId, f.messageId],
+  )
+  const row = rows[0]
+  if (!row || row.author_id === f.flaggerId) return
+  const since = new Date(f.now.getTime() - DAY_MS)
+  // A flag that sent its author to the steam room counts towards the limit like a card does.
+  const recent = await q.query(
+    `SELECT (SELECT count(*) FROM admin_cards WHERE chat_id = $1 AND kind = 'flagged' AND payload->>'flagger' = $2 AND created_at >= $3)
+          + (SELECT count(*) FROM flows WHERE chat_id = $1 AND kind IN ('steam', 'spam_delete') AND data->>'flagger' = $2 AND created_at >= $3) AS n`,
+    [f.chatId, String(f.flaggerId), since],
+  )
+  if (Number(recent[0].n) >= f.settings.num('report_daily_limit')) return
+  const key = `flag:${f.chatId}:${f.messageId}`
+  const known = await q.query('SELECT 1 FROM admin_cards WHERE chat_id = $1 AND idempotency_key = $2', [f.chatId, key])
+  if (known.length > 0) return
+  if (await steamsAtOnce(q, f, row)) return steamFlagged(q, f, row)
+  if (row.excerpt || row.media_kind) {
+    await holdText(q, { chatId: f.chatId, messageId: f.messageId, authorId: row.author_id, authorName: row.display_name, text: row.excerpt ?? '', mediaKind: row.media_kind ?? null, reason: 'card', days: f.settings.num('held_text_days'), now: f.now })
+  }
+  const facts = row.facts
+  await createCard(q, {
+    chatId: f.chatId,
+    key,
+    kind: 'flagged',
+    payload: { targetUserId: row.author_id, targetName: row.display_name, messageId: f.messageId, category: facts ? categoryOf(facts) : null, spam: facts?.spam ?? null, flagger: f.flaggerId },
+    now: f.now,
+  })
 }

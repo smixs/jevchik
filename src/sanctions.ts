@@ -227,7 +227,7 @@ export function appealUrl(ctx: Ctx, chatId: number): string {
 
 /** The joke with the appeal button; a channel has no appeal, so its joke goes without one (section 3.6.4). */
 async function sendStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
-  const text = loadJokes().replies[flow.data.jokeIdx].replaceAll('{name}', flow.data.name)
+  const text = flow.data.reply ?? loadJokes().replies[flow.data.jokeIdx].replaceAll('{name}', flow.data.name)
   const buttons = channelTarget(flow) ? undefined : [[{ text: 'Я не спамер', url: appealUrl(ctx, flow.chatId) }]]
   const outcome = await execOp(ctx, { chatId: flow.chatId, key: `${flow.key}:send`, kind: 'send_message', payload: { text, buttons } })
   return waiting(outcome) ? 'wait' : 'ok'
@@ -243,7 +243,7 @@ async function reviewCardStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
 
 async function banAllowed(ctx: Ctx, flow: Flow): Promise<boolean> {
   const rows = await ctx.db.query('SELECT state, appeal_status, source FROM bans WHERE ban_id = $1', [flow.data.banId])
-  return rows[0]?.state === 'steam' && rows[0].source === 'auto' && !['accepted', 'evaluating'].includes(rows[0].appeal_status)
+  return rows[0]?.state === 'steam' && rows[0].source === 'auto' && rows[0].appeal_status !== 'accepted'
 }
 
 async function banStillDue(ctx: Ctx, flow: Flow): Promise<StepResult> {
@@ -350,6 +350,39 @@ export async function unbanRecord(ctx: Ctx, flow: Flow): Promise<StepResult> {
   return 'ok'
 }
 
+/** Every flow that changes the sanction of a member: while one runs, an administrator waits. */
+export const SANCTION_FLOWS = ['app_steam', 'app_ban', 'app_unban', 'steam', 'ban', 'unban', 'admin_ban', 'card_spam', 'card_ban', 'card_restore', 'card_unban', 'card_unsanction']
+
+/**
+ * The button lifts only after the ban of the term and any action of an administrator on the member are over: otherwise a ban
+ * already on its way lands after the lifting and stays without a record (model Appeal, NoHiddenBan).
+ */
+async function othersSettled(ctx: Ctx, flow: Flow): Promise<StepResult> {
+  const rows = await ctx.db.query(
+    `SELECT 1 FROM flows WHERE chat_id = $1 AND kind = ANY($3) AND status = 'running' AND data->>'userId' = $2 AND flow_id <> $4`,
+    [flow.chatId, String(flow.data.userId), SANCTION_FLOWS, flow.flowId],
+  )
+  return rows.length > 0 ? 'wait' : 'ok'
+}
+
+/**
+ * A step of the button runs only on the automatic record it was pressed for, while the press still stands: a ban of an
+ * administrator from the Mini App (source 'admin') or from a card (appeal 'rejected') stays (AdminWins).
+ */
+function appealStep(step: Step): Step {
+  return async (ctx, flow) => {
+    const rows = await ctx.db.query(
+      `SELECT 1 FROM bans WHERE chat_id = $1 AND user_id = $2 AND source = 'auto' AND appeal_status = 'accepted' AND ($3::uuid IS NULL OR ban_id = $3)`,
+      [
+      flow.chatId,
+      flow.data.userId,
+      flow.data.banId ?? null,
+      ],
+    )
+    return rows.length > 0 ? step(ctx, flow) : 'stop'
+  }
+}
+
 // ---------------------------------------------------------------- admin ban and karma punishments
 
 export async function adminBanRecord(ctx: Ctx, flow: Flow): Promise<StepResult> {
@@ -438,7 +471,7 @@ export function registerSanctionFlows(): void {
   registerFlow('steam', [checkTarget, ...STEAM_ACTION_STEPS, steamedCard])
   registerFlow('spam_delete', [checkTarget, deleteStep, markDeleted, reviewCardStep])
   registerFlow('ban', [banStillDue, banCall, banRecord])
-  registerFlow('unban', [liftStep, unbanRecord])
+  registerFlow('unban', [othersSettled, appealStep(liftStep), appealStep(unbanRecord)])
   registerFlow('admin_ban', [async (ctx, flow) => banCall(ctx, flow), adminBanRecord])
   registerFlow('punish', [quietCheck, punishStep])
   registerFlow('unpunish', [unpunishStep])
@@ -453,6 +486,10 @@ export interface SpamFlowData {
   sentAt: string
   category: string
   spam: number | null
+  /** Section 3.6.6: a fixed reply instead of a joke from the set. */
+  reply?: string
+  /** Section 3.7: the member whose report emoji started the flow; counts towards their daily limit. */
+  flagger?: number
 }
 
 /** The joke, the explanation and the picture of a bath record, through the injected random source. */
@@ -460,6 +497,15 @@ export function jokePicks(rng: Ctx['rng']): { jokeIdx: number; explanationIdx: n
   const pick = (n: number): number => Math.min(n - 1, Math.floor(rng.next() * n))
   const set = loadJokes()
   return { jokeIdx: pick(set.replies.length), explanationIdx: pick(set.explanations.length), imageIdx: pick(set.images.length) }
+}
+
+/** A member already in the bath, or on the way there (T-steam-race): one record, one restriction, one joke. */
+export async function alreadySteamed(q: Q, chatId: number, userId: number): Promise<boolean> {
+  // The evaluation and a flag of the same member may run at once: the lock holds the check and the new flow together until commit.
+  await q.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`steam:${chatId}:${userId}`])
+  if ((await q.query('SELECT 1 FROM bans WHERE chat_id = $1 AND user_id = $2', [chatId, userId])).length > 0) return true
+  const flows = await q.query(`SELECT 1 FROM flows WHERE chat_id = $1 AND kind = 'steam' AND status = 'running' AND (data->>'userId')::bigint = $2`, [chatId, userId])
+  return flows.length > 0
 }
 
 export async function startSteam(q: Q, ctx: Pick<Ctx, 'rng'>, data: SpamFlowData & { chatId: number }, at: Date): Promise<void> {
@@ -483,9 +529,9 @@ export async function startSpamDelete(q: Q, chatId: number, data: SpamFlowData &
   })
 }
 
-export async function startUnban(q: Q, target: { chatId: number; userId: number; probation: boolean }, key: string, at: Date): Promise<void> {
-  const { chatId, userId, probation } = target
-  await createFlow(q, { chatId, kind: 'unban', key, data: { userId, probation }, now: at })
+export async function startUnban(q: Q, target: { chatId: number; userId: number; banId: string; probation: boolean }, key: string, at: Date): Promise<void> {
+  const { chatId, userId, banId, probation } = target
+  await createFlow(q, { chatId, kind: 'unban', key, data: { userId, banId, probation }, now: at })
 }
 
 export async function scheduleDueBans(ctx: Ctx): Promise<number> {

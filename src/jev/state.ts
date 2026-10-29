@@ -47,11 +47,10 @@ export interface QuestionFilter {
   hasReply: boolean
 }
 
-/** Applies the presence rules of section 3.5. appeal_genuine never belongs to message evaluation. */
+/** Applies the presence rules of section 3.5. */
 export function selectQuestions(all: QuestionSet, filter: QuestionFilter): QuestionSet {
   const picked: QuestionSet = {}
   for (const [name, question] of Object.entries(all)) {
-    if (name === 'appeal_genuine') continue
     if (name === 'profile_promo' && !filter.hasProfile) continue
     if (name === 'media_fits' && !(filter.hasMedia && filter.hasReply)) continue
     picked[name] = question

@@ -30,7 +30,7 @@ beforeEach(async () => {
   h.tg.admins = [{ user_id: ADMIN.id, is_bot: false }]
   h.tg.members.set(ADMIN.id, 'administrator')
   h.jev.script(SPAM, { spam_earnings_crypto: 0.95 })
-  h.jev.script(MILD, { spam_other_offer: 0.6 })
+  h.jev.script(MILD, { spam_other_offer: 0.5 })
   await pastObservation(h)
 })
 afterEach(async () => {
@@ -68,7 +68,7 @@ function card(head: string[], quote: string, id: number): { text: string; entiti
 
 const MEMBER = 'Участник: Канал Васи (@vasya_channel)'
 const BANNED = card(['Удалил спам и забанил канал', MEMBER, 'Категория: Лёгкие деньги и крипта', 'Уверенность: 95%'], SPAM, 700)
-const REVIEW = card(['Похоже на спам, реши', MEMBER, 'Категория: Навязчивая реклама', 'Уверенность: 60%'], MILD, 701)
+const REVIEW = card(['Похоже на спам, реши', MEMBER, 'Категория: Навязчивая реклама', 'Уверенность: 50%'], MILD, 701)
 
 async function lastCard(): Promise<number> {
   return Number((await h.db.query('SELECT card_id FROM admin_cards ORDER BY card_id DESC LIMIT 1'))[0].card_id)
@@ -282,7 +282,7 @@ describe('F31: spam of a new channel (section 3.6.4)', () => {
     await h.send(post(700, SPAM))
     await settled()
     const asked = h.jev.requests.length
-    expect(await submitAppeal(h.ctx, CHAT, CHANNEL.id, 'Я живой человек, ошибся')).toEqual({ status: 'not_allowed' })
+    expect(await submitAppeal(h.ctx, CHAT, CHANNEL.id)).toEqual({ status: 'not_allowed' })
     expect(await appealState(h.ctx, CHAT, CHANNEL.id)).toEqual({ status: 'none', allowed: false })
     expect(h.jev.requests).toHaveLength(asked)
     expect(await h.db.query('SELECT appeal_status FROM bans')).toEqual([{ appeal_status: 'none' }])

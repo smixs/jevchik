@@ -43,8 +43,8 @@ const spamOf = async (id: number): Promise<number | null> => (await h.db.query('
 describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () => {
   it('boundary: the fifth message of a member is judged, the sixth is not; both evaluations are stored', async () => {
     await history(CAROL, 4)
-    h.jev.script(MILD, { spam_other_offer: 0.6 })
-    h.jev.script(`${MILD}!`, { spam_other_offer: 0.6 })
+    h.jev.script(MILD, { spam_other_offer: 0.5 })
+    h.jev.script(`${MILD}!`, { spam_other_offer: 0.5 })
     await h.send(message({ id: 700, from: CAROL, text: MILD }))
     await h.app.settle()
     // Section 3.6.2: from 0.30 up to the threshold of automatic deletion only a card; the message stays.
@@ -54,7 +54,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
     await h.send(message({ id: 701, from: CAROL, text: `${MILD}!` }))
     await h.app.settle()
     expect(chatCalls()).toEqual([])
-    expect([await spamOf(700), await spamOf(701)]).toEqual([0.6, 0.6])
+    expect([await spamOf(700), await spamOf(701)]).toEqual([0.5, 0.5])
     expect(await h.db.query('SELECT kind FROM admin_cards')).toEqual([{ kind: 'review' }])
   })
 
@@ -70,7 +70,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
 
   it('spec 3.6.0: a new message counts the messages sent not later than it; a delayed evaluation is not changed by later ones', async () => {
     await history(CAROL, 4)
-    h.jev.script(MILD, { spam_other_offer: 0.6 })
+    h.jev.script(MILD, { spam_other_offer: 0.5 })
     await h.send(message({ id: 700, from: CAROL, text: MILD }))
     await h.send(message({ id: 701, from: CAROL, text: 'и ещё' }))
     await h.app.settle()
@@ -133,7 +133,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
       await h.db.query(`INSERT INTO messages (chat_id, message_id, author_id, posted_at) VALUES ($1,$2,$3,'2026-08-01T00:00:00Z')`, [CHAT, id, DAN.id])
     }
     await h.db.query('UPDATE members SET first_message_id = 1 WHERE user_id = $1', [DAN.id])
-    h.jev.script(MILD, { spam_other_offer: 0.6 })
+    h.jev.script(MILD, { spam_other_offer: 0.5 })
     await h.send(message({ id: 700, from: DAN, text: MILD }))
     await h.app.settle()
     expect(chatCalls()).toEqual([])
@@ -142,7 +142,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
   it('spam_newcomer_messages = 0 judges everybody', async () => {
     await setNewcomers(0)
     await history(CAROL, 7)
-    h.jev.script(MILD, { spam_other_offer: 0.6 })
+    h.jev.script(MILD, { spam_other_offer: 0.5 })
     await h.send(message({ id: 700, from: CAROL, text: MILD }))
     await h.app.settle()
     expect(chatCalls().filter((c) => c[1] === CHAT)).toEqual([])
@@ -162,7 +162,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
   it('rule 2: a protected member past the count gets no card; a protected newcomer still does', async () => {
     await history(CAROL, 6)
     await setKarma(h, CAROL.id, 150)
-    h.jev.script(MILD, { spam_other_offer: 0.6 })
+    h.jev.script(MILD, { spam_other_offer: 0.5 })
     await h.send(message({ id: 700, from: CAROL, text: MILD }))
     await h.app.settle()
     expect(chatCalls()).toEqual([])

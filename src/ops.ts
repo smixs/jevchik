@@ -201,10 +201,10 @@ async function attempt(ctx: Ctx, op: Row): Promise<OpOutcome> {
 
 /**
  * A ban out of the steam room carries its `banId` and is checked again right before every call:
- * an accepted or started appeal, or a record that is gone, cancels it (section 3.6).
+ * an accepted appeal, or a record that is gone, cancels it (section 3.6).
  */
 const BAN_STILL_DUE = `(o.operation_kind <> 'ban' OR o.payload->>'banId' IS NULL OR EXISTS (
-  SELECT 1 FROM bans b WHERE b.ban_id::text = o.payload->>'banId' AND b.state = 'steam' AND b.source = 'auto' AND b.appeal_status NOT IN ('accepted', 'evaluating')))`
+  SELECT 1 FROM bans b WHERE b.ban_id::text = o.payload->>'banId' AND b.state = 'steam' AND b.source = 'auto' AND b.appeal_status <> 'accepted'))`
 
 async function cancelIfNotDue(ctx: Ctx, op: Row): Promise<OpOutcome> {
   const cancelled = await ctx.db.query(

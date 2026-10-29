@@ -99,7 +99,7 @@ describe('F20: versions and audit', () => {
     expect(h.tg.count('restrictChatMember')).toBe(1)
     expect(h.tg.of('deleteMessage').map((c) => c.args[1])).toEqual([1])
     expect(await h.db.query(`SELECT kind, payload->>'messageId' AS id FROM admin_cards WHERE kind = 'review'`)).toEqual([{ kind: 'review', id: '2' }])
-    expect((await getSettings(h.db, CHAT, 0)).num('spam_auto_threshold')).toBe(0.9)
+    expect((await getSettings(h.db, CHAT, 0)).num('spam_auto_threshold')).toBe(0.6)
     expect((await getSettings(h.db, CHAT)).num('spam_auto_threshold')).toBe(0.99)
   })
 
@@ -146,7 +146,6 @@ describe('settings failures', () => {
     await change('spam_review_delete_threshold', 0.6, 0)
     await expect(change('spam_review_threshold', 0.65, 0)).rejects.toThrow('violates')
     await change('spam_review_threshold', 0.6, 0)
-    await expect(change('appeal_reject', 0.9, 0)).rejects.toThrow('violates')
     await expect(change('punish_mute_week_karma', -5, 0)).rejects.toThrow('violates')
   })
 
@@ -214,5 +213,25 @@ describe('settings through the API', () => {
     expect(state).toEqual({ ends_at: '2026-09-20T00:00:00.000Z', active: true })
     expect((await listAudit(h.db, CHAT)).length).toBe(1)
     expect((await send(web, 'POST', '/api/admin/observation', VECTORS.admin_admin, { until: 'soon' })).status).toBe(422)
+  })
+})
+
+describe('migration 014: from 0.6 the bot removes spam itself', () => {
+  const migration = readFileSync(new URL('../src/migrations/014_spam_auto_60.sql', import.meta.url), 'utf8')
+
+  it('stored thresholds above 0.6 get a new version 0.6 by nobody; lower ones and other chats stay; a second run changes nothing', async () => {
+    const at = h.clock.now()
+    for (const [key, value] of [['spam_auto_threshold', 0.9], ['spam_review_delete_threshold', 0.9], ['spam_review_threshold', 0.45]] as const) {
+      await h.db.query(`INSERT INTO chat_settings (chat_id, key, version, value, created_at) VALUES ($1,$2,1,$3,$4)`, [CHAT, key, JSON.stringify(value), at])
+    }
+    await h.db.query(migration)
+    await h.db.query(migration)
+    const s = await getSettings(h.db, CHAT)
+    expect([s.num('spam_auto_threshold'), s.num('spam_review_delete_threshold'), s.num('spam_review_threshold')]).toEqual([0.6, 0.6, 0.45])
+    expect(await h.db.query('SELECT key, version, old_value, new_value, changed_by FROM settings_audit ORDER BY key')).toEqual([
+      { key: 'spam_auto_threshold', version: 2, old_value: 0.9, new_value: 0.6, changed_by: null },
+      { key: 'spam_review_delete_threshold', version: 2, old_value: 0.9, new_value: 0.6, changed_by: null },
+    ])
+    expect((await getSettings(h.db, CHAT + 1)).num('spam_auto_threshold')).toBe(0.6)
   })
 })

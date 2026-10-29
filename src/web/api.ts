@@ -224,12 +224,10 @@ function mountPublic(app: Api, ctx: Ctx): void {
     return c.json(await appealState(ctx, auth.chatId, auth.userId))
   })
 
+  /** Section 3.6: the button lifts an automatic sanction at once, without an explanation. */
   app.post('/api/appeal', async (c) => {
     const auth = c.get('auth')
-    const body = (await c.req.json().catch(() => null)) as { text?: unknown } | null
-    const text = typeof body?.text === 'string' ? body.text : ''
-    const result = await submitAppeal(ctx, auth.chatId, auth.userId, text)
-    return c.json(result, result.status === 'invalid' ? 422 : 200)
+    return c.json(await submitAppeal(ctx, auth.chatId, auth.userId))
   })
 
   /** Section 3.6.5: a member under a sanction of an administrator asks the administrators to lift it, once. */

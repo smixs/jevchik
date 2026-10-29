@@ -9,9 +9,10 @@ Telegram-бот для групповых чатов: карма за польз
 - **Карма.** Участники получают карму за реакции других людей, ответы, цитаты, диалоги и благодарности, а также за полезные сообщения по оценке Jev. 👎 снимает карму. Накрутку гасят логарифмы и дневные лимиты.
 - **Тег с кармой.** Рядом с именем участника в чате видна его карма числом, например `+321`. Админам и владельцу чата Telegram тег ставить не даёт; тег, поставленный человеком вручную, бот не трогает.
 - **Mini App.** Лидерборд за неделю, месяц и всё время; личная страница участника с цифрами, графиком и лучшими сообщениями (её можно скрыть); баня с замаскированными именами спамеров.
-- **Антиспам для новичков.** Первые пять сообщений участника в чате проверяются на спам. Явный спам удаляется сам, автор попадает в «парилку» (не может писать), в чат уходит шуточная реплика. Через сутки парилка превращается в бан.
-- **Разбан через Mini App.** Под репликой кнопка «Я не спамер»: человек пишет короткое объяснение, Jev его оценивает. Попытка одна.
+- **Антиспам для новичков.** Первые пять сообщений участника в чате проверяются на спам. Явный спам (оценка Jev от 60% или типичная фраза спама вроде «куплю USDT», «0.5 на пробу», «несложное дело, плачу сразу») удаляется сам, автор попадает в «парилку» (не может писать), в чат уходит шуточная реплика. Через сутки парилка превращается в бан.
+- **Разбан через Mini App.** Под репликой кнопка «Я не спамер»: в Mini App человек нажимает «Разбанить меня», и ограничение снимается сразу, без объяснений. Попытка одна, дальше испытательный срок.
 - **Команды.** `/spam` - админ отвечает этой командой на сообщение, бот удаляет его и отправляет автора в парилку. `/report` - любой участник жалуется на сообщение, админы получают карточку.
+- **Знак «похоже на спам».** Реакция 🖕 на сообщение: новичка без кармы бот сразу отправляет в парилку, на остальных админы получают карточку «Спам» / «Не спам».
 - **Карточки админам.** В личные сообщения: цитата, ссылка на сообщение, категория, уверенность и кнопки «Спам», «Не спам», «Не спам, вернуть», «Забанить». После нажатия бот пишет итог и правит карточку у всех админов.
 - **Модерация из Mini App.** Любой админ чата на странице участника отправляет его в парилку на час, сутки или неделю, банит или разбанивает; в бане видит настоящие имена и снимает наказание одной кнопкой. Наказанный может один раз попросить разбан, админы получают карточку «Разбанить» / «Оставить».
 - **Каналы.** Канал, который пишет в чате, получает карму и стоит в лидерборде с пометкой «канал».
@@ -113,16 +114,16 @@ Jev отвечает на четыре вопроса: зовёт ли сооб�
 
 ### Что происходит со спамером
 
-1. Новичок пишет сообщение, Jev оценивает его как спам с уверенностью от 90%.
+1. Новичок пишет сообщение, Jev оценивает его как спам с уверенностью от 60%, или в сообщении есть типичная фраза спама.
 2. Бот удаляет сообщение и запрещает автору писать («парилка»).
 3. В чат уходит шуточная реплика с кнопкой «Я не спамер».
 4. Автор появляется в бане в Mini App под замаскированным именем.
 5. Админы получают карточку «Удалил спам и заглушил автора».
-6. Автор может один раз нажать кнопку и объяснить, кто он. Jev оценивает объяснение: ограничение снимается, или отказ, или решение передаётся админам.
+6. Автор может один раз нажать в Mini App «Разбанить меня»: ограничение снимается сразу.
 7. После разбана следующие 5 сообщений проверяются строже, ссылки в них удаляются.
 8. Если за сутки разбана не было, парилка превращается в бан.
 
-Если уверенность от 30% до 90%, сообщение остаётся, а админы получают карточку «Похоже на спам, реши». Безобидное первое сообщение новичка с рекламным профилем обрабатывается как явный спам. Админов и владельца чата бот не наказывает. Участника с кармой от 100 бот тоже не наказывает сам, а зовёт админа.
+Если уверенность от 30% до 60%, сообщение остаётся, а админы получают карточку «Похоже на спам, реши». Безобидное первое сообщение новичка с рекламным профилем обрабатывается как явный спам. Админов и владельца чата бот не наказывает. Участника с кармой от 100 бот тоже не наказывает сам, а зовёт админа.
 
 ### Что видит админ
 
@@ -164,7 +165,7 @@ Mini App открывается кнопкой под репликой о спа
 
 | Ключ | По умолчанию | Что меняет |
 |---|---|---|
-| `spam_auto_threshold` | 0.9 | уверенность в спаме, с которой бот сам удаляет сообщение новичка и отправляет автора в парилку |
+| `spam_auto_threshold` | 0.6 | уверенность в спаме, с которой бот сам удаляет сообщение новичка и отправляет автора в парилку |
 | `spam_review_threshold` | 0.3 | уверенность, с которой админы получают карточку «Похоже на спам, реши» |
 | `profile_auto_threshold` | 0.8 | уверенность в рекламном профиле, с которой первое сообщение новичка обрабатывается как спам |
 | `spam_newcomer_messages` | 5 | сколько сообщений участник считается новичком; 0 - проверять всех |
@@ -172,12 +173,12 @@ Mini App открывается кнопкой под репликой о спа
 | `protect_threshold` | 100 | карма, с которой бот не наказывает участника сам, а жалоба участника сразу убирает сообщение |
 | `steam_hours` | 24 | сколько часов длится парилка до бана |
 | `probation_messages`, `probation_review_delete_threshold` | 5, 0.3 | испытательный срок после разбана: сколько сообщений и с какой уверенности сообщение удаляется |
-| `appeal_accept`, `appeal_reject` | 0.7, 0.3 | оценка объяснения при разбане: от первого - разбан, ниже второго - отказ, между - решают админы |
 | `reactions_minus`, `reactions_ignore` | `["👎"]`, `["💩","🤮","🤡"]` | минусующие и игнорируемые реакции; все остальные плюсуют |
 | `base_reaction`, `base_reply`, `base_quote`, `base_dialog`, `base_thanks`, `base_minus` | 1, 2, 3, 4, 6, -1 | вес реакции, ответа, цитаты, диалога, благодарности и минуса |
 | `usefulness_points` | `[0,0,0.1,0.25,0.5]` | надбавка за пользу по оценке Jev для уровней 0-4 |
 | `minus_daily_limit`, `minus_min_karma` | 5, 1 | сколько минусов в сутки можно поставить и с какой кармы |
 | `report_daily_limit`, `report_author_delta`, `report_reporter_delta` | 10, -20, 5 | лимит жалоб в сутки; сколько теряет автор и получает заявитель при подтверждённой жалобе |
+| `report_steam_karma` | 5 | карма, ниже которой новичок по знаку 🖕 сразу уходит в парилку |
 | `punish_media_karma`, `punish_mute_day_karma`, `punish_mute_week_karma` | -10, -25, -40 | пороги наказаний: запрет ссылок и медиа, мьют на сутки, мьют на неделю |
 | `karma_lower_bound` | -50 | ниже этой кармы не бывает |
 | `silence_days`, `decay_period_days`, `decay_rate` | 14, 30, 0.1 | через сколько дней молчания карма начинает убывать, как часто и на какую долю |
@@ -192,8 +193,6 @@ Mini App открывается кнопкой под репликой о спа
 | `held_text_days` | 30 | сколько суток админам доступен текст убранных сообщений (не больше 30) |
 | `previous_messages_count` | 8 | сколько предыдущих реплик видит Jev |
 | `questions` | из `eval/questions.json` | вопросы к Jev |
-
-Вопрос для разбана `appeal_genuine` по умолчанию рассчитан на чат об ИИ и разработке. Для чата на другую тему поправьте его текст в настройке `questions`.
 
 ## Предупреждение о лексике
 
@@ -246,9 +245,10 @@ The bot's own texts (cards, replies, Mini App) are in Russian.
 - **Karma.** Members earn karma from other people's reactions, replies, quotes, dialogs and thanks, and from useful messages as judged by Jev. 👎 takes karma away. Logarithms and daily limits damp vote farming.
 - **Karma tag.** A member's karma is shown as a number next to their name in the chat, for example `+321`. Telegram does not let bots tag admins and the chat owner; a tag a person set by hand is left alone.
 - **Mini App.** Leaderboard for the week, the month and all time; a personal page with numbers, a chart and the best messages (it can be hidden); the "bathhouse" with masked names of spammers.
-- **Anti-spam for newcomers.** A member's first five messages are checked for spam. Clear spam is deleted automatically, the author goes to the "steam room" (cannot write), and a joke reply is posted to the chat. After a day the steam room turns into a ban.
-- **Unban through the Mini App.** The joke reply has a button «Я не спамер» ("I am not a spammer"): the person writes a short explanation and Jev judges it. One attempt.
+- **Anti-spam for newcomers.** A member's first five messages are checked for spam. Clear spam (a Jev score of 60% or more, or a typical spam phrase such as «куплю USDT» or «0.5 на пробу») is deleted automatically, the author goes to the "steam room" (cannot write), and a joke reply is posted to the chat. After a day the steam room turns into a ban.
+- **Unban through the Mini App.** The joke reply has a button «Я не спамер» ("I am not a spammer"): in the Mini App the person presses «Разбанить меня» ("unban me") and the restriction is lifted at once, no explanation. One attempt, then probation.
 - **Commands.** `/spam` - an admin replies to a message with it; the bot deletes the message and sends its author to the steam room. `/report` - any member reports a message; admins get a card.
+- **The "looks like spam" sign.** The 🖕 reaction on a message: a newcomer without karma goes to the steam room at once; for anybody else admins get a card with «Спам» / «Не спам».
 - **Admin cards.** In private messages: a quote, a link to the message, the category, the confidence and the buttons «Спам», «Не спам», «Не спам, вернуть», «Забанить» (spam, not spam, not spam and restore, ban). After a press the bot reports the result and edits the card for every admin.
 - **Moderation from the Mini App.** Any chat admin can, on a member's page, send them to the steam room for an hour, a day or a week, ban or unban them; in the bathhouse an admin sees real names and lifts a sanction with one button. A sanctioned member may ask for an unban once; admins get a card with «Разбанить» / «Оставить» (unban / keep).
 - **Channels.** A channel that writes in the chat earns karma and stands in the leaderboard with a «канал» (channel) mark.
@@ -350,16 +350,16 @@ Spam by text is judged only for a newcomer - a member with at most 5 messages in
 
 ### What happens to a spammer
 
-1. A newcomer writes a message, and Jev rates it as spam with a confidence of 90% or more.
+1. A newcomer writes a message, and Jev rates it as spam with a confidence of 60% or more, or the message has a typical spam phrase.
 2. The bot deletes the message and stops the author from writing (the "steam room").
 3. A joke reply with the «Я не спамер» button goes to the chat.
 4. The author appears in the bathhouse in the Mini App under a masked name.
 5. Admins get the card «Удалил спам и заглушил автора» ("deleted spam and muted the author").
-6. The author can press the button once and explain who they are. Jev judges the explanation: the restriction is lifted, or refused, or the decision goes to the admins.
+6. The author can press «Разбанить меня» in the Mini App once: the restriction is lifted at once.
 7. After an unban the next 5 messages are checked more strictly, and links in them are deleted.
 8. If there was no unban within a day, the steam room turns into a ban.
 
-With a confidence from 30% to 90% the message stays and admins get the card «Похоже на спам, реши» ("looks like spam, decide"). A harmless first message from a newcomer with an advertising profile is handled like clear spam. The bot never punishes admins or the chat owner. It does not punish a member with karma of 100 or more on its own either; it calls an admin.
+With a confidence from 30% to 60% the message stays and admins get the card «Похоже на спам, реши» ("looks like spam, decide"). A harmless first message from a newcomer with an advertising profile is handled like clear spam. The bot never punishes admins or the chat owner. It does not punish a member with karma of 100 or more on its own either; it calls an admin.
 
 ### What an admin sees
 
@@ -401,7 +401,7 @@ Main keys:
 
 | Key | Default | What it changes |
 |---|---|---|
-| `spam_auto_threshold` | 0.9 | spam confidence at which the bot deletes a newcomer's message itself and sends the author to the steam room |
+| `spam_auto_threshold` | 0.6 | spam confidence at which the bot deletes a newcomer's message itself and sends the author to the steam room |
 | `spam_review_threshold` | 0.3 | confidence at which admins get the "looks like spam, decide" card |
 | `profile_auto_threshold` | 0.8 | advertising-profile confidence at which a newcomer's first message is handled as spam |
 | `spam_newcomer_messages` | 5 | for how many messages a member counts as a newcomer; 0 checks everybody |
@@ -409,12 +409,12 @@ Main keys:
 | `protect_threshold` | 100 | karma from which the bot does not punish a member itself and the member's report removes a message at once |
 | `steam_hours` | 24 | how many hours the steam room lasts before the ban |
 | `probation_messages`, `probation_review_delete_threshold` | 5, 0.3 | probation after an unban: how many messages, and from which confidence a message is deleted |
-| `appeal_accept`, `appeal_reject` | 0.7, 0.3 | unban explanation score: from the first - unban, below the second - refusal, in between - admins decide |
 | `reactions_minus`, `reactions_ignore` | `["👎"]`, `["💩","🤮","🤡"]` | downvoting and ignored reactions; all others upvote |
 | `base_reaction`, `base_reply`, `base_quote`, `base_dialog`, `base_thanks`, `base_minus` | 1, 2, 3, 4, 6, -1 | weight of a reaction, reply, quote, dialog, thanks and downvote |
 | `usefulness_points` | `[0,0,0.1,0.25,0.5]` | bonus for usefulness as rated by Jev, levels 0-4 |
 | `minus_daily_limit`, `minus_min_karma` | 5, 1 | how many downvotes a day and from which karma |
 | `report_daily_limit`, `report_author_delta`, `report_reporter_delta` | 10, -20, 5 | reports per day; what the author loses and the reporter gains on a confirmed report |
+| `report_steam_karma` | 5 | karma below which a newcomer flagged with 🖕 goes to the steam room at once |
 | `punish_media_karma`, `punish_mute_day_karma`, `punish_mute_week_karma` | -10, -25, -40 | punishment thresholds: no links and media, one-day mute, one-week mute |
 | `karma_lower_bound` | -50 | karma never goes below this |
 | `silence_days`, `decay_period_days`, `decay_rate` | 14, 30, 0.1 | after how many silent days karma starts to decay, how often and by what share |
@@ -429,8 +429,6 @@ Main keys:
 | `held_text_days` | 30 | for how many days admins can read removed messages (at most 30) |
 | `previous_messages_count` | 8 | how many previous messages Jev sees |
 | `questions` | from `eval/questions.json` | the questions for Jev |
-
-The unban question `appeal_genuine` assumes by default a chat about AI and software. For a chat on another topic, edit its text in the `questions` setting.
 
 ## Language warning
 
