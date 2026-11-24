@@ -70,11 +70,12 @@ async function gateOn(minutes?: number): Promise<void> {
   if (minutes !== undefined) await changeSetting(h.db, { chatId: CHAT, key: 'join_gate_minutes', value: minutes, baseVersion: 0, actor: ADMIN.id, now: h.clock.now() })
 }
 
-async function tap(init: string, index: number, token?: string): Promise<Record<string, unknown>> {
+/** A tap on the slot `index` of the layout `round` (0 the first, 1 after a miss). */
+async function tap(init: string, index: number, token?: string, round = 0): Promise<Record<string, unknown>> {
   const response = await web.request('/api/door', {
     method: 'POST',
     headers: { authorization: `tma ${init}`, 'content-type': 'application/json', ...(token ? { 'x-door-token': token } : {}) },
-    body: JSON.stringify({ pick: index }),
+    body: JSON.stringify({ pick: index, round }),
   })
   return (await response.json()) as Record<string, unknown>
 }
@@ -194,19 +195,26 @@ describe('F36: the frog decides', () => {
     const first = await tap(guardInit(DORA, 'q-10'), missAt(await door()))
     expect(first.state).toBe('open')
     expect(first.missed).toBe(true)
+    expect(first.round).toBe(1)
     expect(h.tg.calls).toEqual([])
-    const second = await tap(guardInit(DORA, 'q-10'), missAt(await door()))
+    const second = await tap(guardInit(DORA, 'q-10'), missAt(await door()), undefined, 1)
     expect(second).toEqual({ state: 'failed', title: 'Agents chat' })
     expect(h.tg.calls.map((c) => [c.method, ...c.args])).toEqual([['answerChatJoinRequestQuery', 'q-10', 'decline']])
     expect((await door()).reason).toBe('missed')
   })
 
-  it('a stale tap on the old animals after a miss changes nothing', async () => {
+  it('a tap made on the old layout after a miss (a second screen) spends nothing and shows the current layout', async () => {
     const before = await door()
     await tap(guardInit(DORA, 'q-10'), missAt(before))
-    const stale = await import('../src/gate.js').then((g) => g.pick(h.ctx, before, frogAt(before)))
-    expect(stale.result).toBe('closed')
-    expect((await door()).status).toBe('pending')
+    const shuffled = await door()
+    const oldFrog = frogAt(before)
+    // The second screen still shows the first layout; on the new one that slot may hold another animal.
+    const view = await tap(guardInit(DORA, 'q-10'), oldFrog, undefined, 0)
+    expect([view.state, view.round, view.missed]).toEqual(['open', 1, true])
+    const after = await door()
+    expect([after.status, after.misses, JSON.stringify(after.puzzle)]).toEqual(['pending', 1, JSON.stringify(shuffled.puzzle)])
+    expect(h.tg.calls).toEqual([])
+    expect((await tap(guardInit(DORA, 'q-10'), frogAt(after), undefined, 1)).state).toBe('passed')
   })
 
   it('two taps on the frog at once: one decision, one answer to Telegram', async () => {
@@ -225,10 +233,12 @@ describe('F36: the frog decides', () => {
     expect((await door()).send).toBe('done')
   })
 
-  it('Telegram fails with 5xx: the bot repeats after the pause and closes the send', async () => {
+  it('Telegram fails with 5xx: the window waits («letting», not «Пустил»), the bot repeats after the pause', async () => {
     h.tg.fail('answerChatJoinRequestQuery', tgError.server())
-    await tap(guardInit(DORA, 'q-10'), frogAt(await door()))
+    expect((await tap(guardInit(DORA, 'q-10'), frogAt(await door()))).state).toBe('letting')
     expect((await door()).send).toBe('todo')
+    const early = await buildReport(h.db, new Date(h.clock.now().getTime() + 1000))
+    expect(early.chats.find((c) => c.chatId === CHAT)!.gate!.passed).toBe(0)
     await h.app.tick()
     expect(h.tg.count('answerChatJoinRequestQuery')).toBe(1)
     h.clock.advance(2_000)
@@ -238,6 +248,16 @@ describe('F36: the frog decides', () => {
       ['q-10', 'approve'],
     ])
     expect((await door()).send).toBe('done')
+    expect((await look(guardInit(DORA, 'q-10'))).state).toBe('passed')
+  })
+
+  it('Telegram refuses the approval for good: the window says so, the monitor does not count it as let in', async () => {
+    h.tg.fail('answerChatJoinRequestQuery', tgError.bad('QUERY_ID_INVALID'))
+    h.tg.fail('approveChatJoinRequest', tgError.bad('Bad Request: CHAT_ADMIN_REQUIRED'))
+    expect((await tap(guardInit(DORA, 'q-10'), frogAt(await door()))).state).toBe('stuck')
+    const report = await buildReport(h.db, new Date(h.clock.now().getTime() + 1000))
+    const gate = report.chats.find((c) => c.chatId === CHAT)!.gate!
+    expect([gate.passed, gate.sendFailed]).toEqual([0, 1])
   })
 
   it('the request is gone in Telegram: the send is closed without repeats', async () => {
@@ -269,12 +289,15 @@ describe('F36: the frog decides', () => {
     const response = await get(web, '/api/door')
     expect(response.status).toBe(401)
     const forged = guardInit(DORA, 'q-10').replace(/hash=[0-9a-f]+/, 'hash=' + '0'.repeat(64))
-    expect((await send(web, 'POST', '/api/door', forged, { pick: 0 })).status).toBe(401)
+    expect((await send(web, 'POST', '/api/door', forged, { pick: 0, round: 0 })).status).toBe(401)
   })
 
-  it('a slot outside the six is refused', async () => {
-    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 6 })).status).toBe(422)
-    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: '1' })).status).toBe(422)
+  it('a slot outside the six or a tap without its layout is refused and spends nothing', async () => {
+    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 6, round: 0 })).status).toBe(422)
+    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: '1', round: 0 })).status).toBe(422)
+    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 1 })).status).toBe(422)
+    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 1, round: 2 })).status).toBe(422)
+    expect((await door()).misses).toBe(0)
   })
 })
 
@@ -306,21 +329,50 @@ describe('F36: time, the daily limit and the admins', () => {
     expect((await look(guardInit(DORA, 'q-20'))).state).toBe('timeout')
   })
 
+  it('the time limit holds at the tap too: past it the frog does not let in, even before the tick', async () => {
+    await gateOn(2)
+    await h.send(joinRequest({ query: 'q-21' }))
+    h.tg.calls.length = 0
+    h.clock.advance(2 * 60_000 + 1000)
+    expect((await tap(guardInit(DORA, 'q-21'), frogAt(await door()))).state).toBe('timeout')
+    expect(h.tg.of('answerChatJoinRequestQuery')).toEqual([])
+    await h.app.tick()
+    expect(h.tg.of('answerChatJoinRequestQuery').map((c) => c.args)).toEqual([['q-21', 'decline']])
+  })
+
   it('the fourth request in a day is declined without a window', async () => {
     await gateOn()
     for (const q of ['a', 'b', 'c']) {
       await h.send(joinRequest({ query: q }))
       await tap(guardInit(DORA, q), missAt(await door()))
-      await tap(guardInit(DORA, q), missAt(await door()))
+      await tap(guardInit(DORA, q), missAt(await door()), undefined, 1)
     }
     h.tg.calls.length = 0
     await h.send(joinRequest({ query: 'd' }))
-    await h.app.tick()
+    // The guard gets the refusal within the update itself: its query lives 10 seconds, the tick may be later.
     expect(h.tg.calls.map((c) => [c.method, ...c.args])).toEqual([['answerChatJoinRequestQuery', 'd', 'decline']])
     expect([(await door()).status, (await door()).reason]).toEqual(['failed', 'daily_limit'])
     h.clock.advance(24 * 3600_000 + 1000)
     h.tg.calls.length = 0
     await h.send(joinRequest({ query: 'e' }))
+    expect(h.tg.calls.map((c) => c.method)).toEqual(['sendChatJoinRequestWebApp'])
+  })
+
+  it('refusals of the limit do not prolong it: a day after the three windows the door opens again', async () => {
+    await gateOn()
+    for (const q of ['a', 'b', 'c']) {
+      await h.send(joinRequest({ query: q }))
+      await tap(guardInit(DORA, q), missAt(await door()))
+      await tap(guardInit(DORA, q), missAt(await door()), undefined, 1)
+    }
+    for (const q of ['d', 'e', 'f']) {
+      h.clock.advance(7 * 3600_000)
+      await h.send(joinRequest({ query: q }))
+      expect((await door()).reason).toBe('daily_limit')
+    }
+    h.clock.advance(3 * 3600_000 + 1000)
+    h.tg.calls.length = 0
+    await h.send(joinRequest({ query: 'g' }))
     expect(h.tg.calls.map((c) => c.method)).toEqual(['sendChatJoinRequestWebApp'])
   })
 
@@ -346,6 +398,75 @@ describe('F36: time, the daily limit and the admins', () => {
   })
 })
 
+describe('F36: an old answer never reaches a newer request of the same person', () => {
+  beforeEach(async () => {
+    await gateOn()
+    h.tg.fail('declineChatJoinRequest', tgError.server())
+    await h.send(joinRequest({ query: null }))
+    await tap(initData(DORA), missAt(await door()), (await door()).token)
+    await tap(initData(DORA), missAt(await door()), (await door()).token, 1)
+  })
+
+  it('an unsent refusal is dropped when the person sends a new request', async () => {
+    const old = await door()
+    expect([old.status, old.send]).toEqual(['failed', 'todo'])
+    await h.send(joinRequest({ query: null }))
+    const fresh = await door()
+    expect(fresh.status).toBe('pending')
+    expect((await h.db.query('SELECT send, send_note FROM gate_checks WHERE check_id = $1', [old.check_id]))[0]).toEqual({ send: 'skipped', send_note: 'superseded' })
+    h.clock.advance(10 * 60_000)
+    await h.app.tick()
+    expect(h.tg.count('declineChatJoinRequest')).toBe(1)
+    expect((await door()).status).toBe('pending')
+  })
+
+  it('a refusal whose lease ran out is not sent by the pair once a newer request is there', async () => {
+    const old = await door()
+    await h.db.query(`UPDATE gate_checks SET send = 'sending', send_until = $2 WHERE check_id = $1`, [old.check_id, h.clock.now()])
+    await h.send(joinRequest({ query: null }))
+    h.clock.advance(31_000)
+    await h.app.tick()
+    expect(h.tg.count('declineChatJoinRequest')).toBe(1)
+    expect((await h.db.query('SELECT send FROM gate_checks WHERE check_id = $1', [old.check_id]))[0].send).toBe('skipped')
+  })
+})
+
+describe('F36: a window nobody opened', () => {
+  beforeEach(async () => {
+    await gateOn()
+    await h.send(joinRequest({ query: 'q-40', userChatId: 7001 }))
+    // The process stopped after the commit of the request and before the call: the window was never opened.
+    await h.db.query(`UPDATE gate_checks SET door = 'todo'`)
+    h.tg.calls.length = 0
+  })
+
+  it('the tick opens it in the private chat while the bot may still write first', async () => {
+    h.clock.advance(16_000)
+    await h.app.tick()
+    expect(h.tg.calls.map((c) => [c.method, c.args[0]])).toEqual([['sendMessage', 7001]])
+    expect([(await door()).door, (await door()).via]).toEqual(['open', 'dm'])
+  })
+
+  it('too late for the private chat: the request is left to the admins, nobody declines it', async () => {
+    h.clock.advance(6 * 60_000)
+    await h.app.tick()
+    const check = await door()
+    expect([check.status, check.reason, check.door, check.send]).toEqual(['gone', 'door_failed', 'lost', 'none'])
+    h.clock.advance(20 * 60_000)
+    await h.app.settle()
+    expect(h.tg.calls).toEqual([])
+  })
+
+  it('an opening cut off in the middle: the silence of the window is not declined', async () => {
+    await h.db.query(`UPDATE gate_checks SET door = 'opening'`)
+    h.clock.advance(11 * 60_000)
+    await h.app.tick({ scheduled: true })
+    expect([(await door()).status, (await door()).door]).toEqual(['gone', 'lost'])
+    await h.app.settle()
+    expect(h.tg.calls).toEqual([])
+  })
+})
+
 describe('F36: the monitor line', () => {
   it('counts what the door decided in the day', async () => {
     await gateOn()
@@ -353,7 +474,7 @@ describe('F36: the monitor line', () => {
     await tap(guardInit(DORA, 'm1'), frogAt(await door()))
     await h.send(joinRequest({ from: EVE, query: 'm2' }))
     await tap(guardInit(EVE, 'm2'), missAt(await door(EVE)))
-    await tap(guardInit(EVE, 'm2'), missAt(await door(EVE)))
+    await tap(guardInit(EVE, 'm2'), missAt(await door(EVE)), undefined, 1)
     const report = await buildReport(h.db, new Date(h.clock.now().getTime() + 1000))
     const chat = report.chats.find((c) => c.chatId === CHAT)!
     expect(chat.gate).toEqual({ passed: 1, missed: 1, timeout: 0, limit: 0, admins: 0, noWindow: 0, sendFailed: 0 })

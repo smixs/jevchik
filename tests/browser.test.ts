@@ -10,6 +10,7 @@ import { CHAT, chatOf, createHarness, type Harness } from './support/harness.js'
 import { BOT_TOKEN, VECTORS } from './support/vectors.js'
 import { openPage, type Page, type Patch } from './support/page.js'
 import { buildClient, makeWeb, seedWorld } from './support/web.js'
+import { tgError } from './support/fakes.js'
 
 let h: Harness
 let server: ReturnType<typeof serve>
@@ -342,5 +343,25 @@ describe('F36: the door window (section 3.6.8)', () => {
     expect(page.$('[data-field=door_result]')?.textContent).toBe('Пустил. Заходи и веди себя прилично 🐸')
     expect(h.tg.of('answerChatJoinRequestQuery').map((c) => c.args)).toEqual([['qb-1', 'approve']])
     await changeSetting(h.db, { chatId: CHAT, key: 'join_gate', value: false, baseVersion: 1, actor: 99, now: h.clock.now() })
+  })
+
+  it('Telegram did not take the approval yet: the window waits and says «Пустил» only after it did', async () => {
+    await changeSetting(h.db, { chatId: CHAT, key: 'join_gate', value: true, baseVersion: 2, actor: 99, now: h.clock.now() })
+    await h.send({ update_id: 95_002, chat_join_request: { chat: chatOf(CHAT), from: DORA, user_chat_id: DORA.id, date: 0, query_id: 'qb-2' } } as never)
+    h.tg.fail('answerChatJoinRequestQuery', tgError.server())
+    const page = await open(guardInit('qb-2'), { path: '/?door=guard' })
+    await page.waitFor('[data-field=door][data-state=open] [data-field=beasts]')
+    const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE query_id = 'qb-2'`))[0].puzzle.slots as string[]
+    await page.click(`button[data-slot="${slots.indexOf('frog')}"]`)
+    await page.waitFor('[data-field=door][data-state=letting]')
+    expect(page.opened).not.toContain('close')
+    h.clock.advance(2_000)
+    await h.app.tick()
+    await page.waitFor('[data-field=door][data-state=passed]')
+    expect(h.tg.of('answerChatJoinRequestQuery').map((c) => c.args).filter((args) => args[0] === 'qb-2')).toEqual([
+      ['qb-2', 'approve'],
+      ['qb-2', 'approve'],
+    ])
+    await changeSetting(h.db, { chatId: CHAT, key: 'join_gate', value: false, baseVersion: 3, actor: 99, now: h.clock.now() })
   })
 })

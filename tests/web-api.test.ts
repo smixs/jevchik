@@ -246,7 +246,7 @@ describe('the appeal through the API', () => {
     expect(await json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, {}))).toEqual({ status: 'check_required' })
     expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toMatchObject({ state: 'open' })
     const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal'`))[0].puzzle.slots as string[]
-    const response = await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.indexOf('frog') })
+    const response = await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.indexOf('frog'), round: 0 })
     expect(await response.json()).toEqual({ status: 'accepted', lifted: true })
     expect(h.jev.requests).toEqual([])
     expect(await karmaOf(h, ALICE.id)).toBe(12.5)
@@ -257,11 +257,18 @@ describe('the appeal through the API', () => {
     await h.db.query('UPDATE members SET bans_count = 1 WHERE user_id = 3 AND chat_id = $1', [CHAT])
     const check = await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))
     expect((check.puzzle as unknown[]).length).toBe(6)
+    expect(check.round).toBe(0)
+    const pending = async () => (await h.db.query(`SELECT puzzle, misses FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal' AND status = 'pending'`))[0]
     const miss = async () => {
-      const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal' AND status = 'pending'`))[0].puzzle.slots as string[]
-      return json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.findIndex((k) => k !== 'frog') }))
+      const row = await pending()
+      const slots = row.puzzle.slots as string[]
+      return json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.findIndex((k) => k !== 'frog'), round: Number(row.misses) }))
     }
-    expect(await miss()).toMatchObject({ status: 'check_miss' })
+    expect(await miss()).toMatchObject({ status: 'check_miss', round: 1 })
+    // A tap made on the first layout (another screen) spends nothing.
+    const stale = await json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: 0, round: 0 }))
+    expect(stale).toMatchObject({ status: 'check_stale', round: 1 })
+    expect((await pending()).misses).toBe(1)
     expect(await miss()).toEqual({ status: 'check_failed' })
     expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toEqual({ state: 'wait' })
     expect(await json(await get(web, '/api/appeal', VECTORS.carol_appeal))).toEqual({ status: 'none', allowed: true })
