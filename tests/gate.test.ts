@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto'
 import type { Update } from 'grammy/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { sendOne } from '../src/gate.js'
 import { KINDS, shapes, sprite } from '../src/gate-sprites.js'
 import { buildReport, renderReport } from '../src/monitor.js'
 import { changeSetting } from '../src/settings/settings.js'
@@ -70,12 +71,15 @@ async function gateOn(minutes?: number): Promise<void> {
   if (minutes !== undefined) await changeSetting(h.db, { chatId: CHAT, key: 'join_gate_minutes', value: minutes, baseVersion: 0, actor: ADMIN.id, now: h.clock.now() })
 }
 
-/** A tap on the slot `index` of the layout `round` (0 the first, 1 after a miss). */
-async function tap(init: string, index: number, token?: string, round = 0): Promise<Record<string, unknown>> {
+const layoutOf = (check: Record<string, unknown>): string => (check.puzzle as { id: string }).id
+
+/** A tap on the slot `index` of the layout `layout`; by default the layout of the newest pending check. */
+async function tap(init: string, index: number, token?: string, layout?: string): Promise<Record<string, unknown>> {
+  const current = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE status = 'pending' ORDER BY check_id DESC LIMIT 1`))[0]
   const response = await web.request('/api/door', {
     method: 'POST',
     headers: { authorization: `tma ${init}`, 'content-type': 'application/json', ...(token ? { 'x-door-token': token } : {}) },
-    body: JSON.stringify({ pick: index, round }),
+    body: JSON.stringify({ pick: index, layout: layout ?? (current ? layoutOf(current) : '0'.repeat(16)) }),
   })
   return (await response.json()) as Record<string, unknown>
 }
@@ -195,9 +199,9 @@ describe('F36: the frog decides', () => {
     const first = await tap(guardInit(DORA, 'q-10'), missAt(await door()))
     expect(first.state).toBe('open')
     expect(first.missed).toBe(true)
-    expect(first.round).toBe(1)
+    expect(first.layout).toBe(layoutOf(await door()))
     expect(h.tg.calls).toEqual([])
-    const second = await tap(guardInit(DORA, 'q-10'), missAt(await door()), undefined, 1)
+    const second = await tap(guardInit(DORA, 'q-10'), missAt(await door()))
     expect(second).toEqual({ state: 'failed', title: 'Agents chat' })
     expect(h.tg.calls.map((c) => [c.method, ...c.args])).toEqual([['answerChatJoinRequestQuery', 'q-10', 'decline']])
     expect((await door()).reason).toBe('missed')
@@ -209,12 +213,12 @@ describe('F36: the frog decides', () => {
     const shuffled = await door()
     const oldFrog = frogAt(before)
     // The second screen still shows the first layout; on the new one that slot may hold another animal.
-    const view = await tap(guardInit(DORA, 'q-10'), oldFrog, undefined, 0)
-    expect([view.state, view.round, view.missed]).toEqual(['open', 1, true])
+    const view = await tap(guardInit(DORA, 'q-10'), oldFrog, undefined, layoutOf(before))
+    expect([view.state, view.layout, view.missed]).toEqual(['open', layoutOf(shuffled), true])
     const after = await door()
     expect([after.status, after.misses, JSON.stringify(after.puzzle)]).toEqual(['pending', 1, JSON.stringify(shuffled.puzzle)])
     expect(h.tg.calls).toEqual([])
-    expect((await tap(guardInit(DORA, 'q-10'), frogAt(after), undefined, 1)).state).toBe('passed')
+    expect((await tap(guardInit(DORA, 'q-10'), frogAt(after))).state).toBe('passed')
   })
 
   it('two taps on the frog at once: one decision, one answer to Telegram', async () => {
@@ -260,15 +264,23 @@ describe('F36: the frog decides', () => {
     expect([gate.passed, gate.sendFailed]).toEqual([0, 1])
   })
 
-  it('the request is gone in Telegram: the send is closed without repeats', async () => {
+  it('the request is gone in Telegram: the send is closed without repeats, the window does not say «Пустил»', async () => {
     h.tg.fail('answerChatJoinRequestQuery', tgError.bad('QUERY_ID_INVALID'))
     h.tg.fail('approveChatJoinRequest', tgError.bad('Bad Request: HIDE_REQUESTER_MISSING'))
-    await tap(guardInit(DORA, 'q-10'), frogAt(await door()))
+    expect((await tap(guardInit(DORA, 'q-10'), frogAt(await door()))).state).toBe('gone')
     const check = await door()
-    expect([check.send, check.send_note]).toEqual(['done', 'Bad Request: HIDE_REQUESTER_MISSING'])
+    expect([check.send, check.send_note]).toEqual(['missing', 'Bad Request: HIDE_REQUESTER_MISSING'])
+    const report = await buildReport(h.db, new Date(h.clock.now().getTime() + 1000))
+    expect(report.chats.find((c) => c.chatId === CHAT)!.gate!.passed).toBe(0)
     h.clock.advance(60_000)
     await h.app.settle()
     expect(h.tg.count('approveChatJoinRequest')).toBe(1)
+  })
+
+  it('the person is in already: the approval counts as let in', async () => {
+    h.tg.fail('answerChatJoinRequestQuery', tgError.bad('QUERY_ID_INVALID'))
+    h.tg.fail('approveChatJoinRequest', tgError.bad('Bad Request: USER_ALREADY_PARTICIPANT'))
+    expect((await tap(guardInit(DORA, 'q-10'), frogAt(await door()))).state).toBe('passed')
   })
 
   it('a lease that ran out is taken over by the bot and closed once', async () => {
@@ -289,14 +301,15 @@ describe('F36: the frog decides', () => {
     const response = await get(web, '/api/door')
     expect(response.status).toBe(401)
     const forged = guardInit(DORA, 'q-10').replace(/hash=[0-9a-f]+/, 'hash=' + '0'.repeat(64))
-    expect((await send(web, 'POST', '/api/door', forged, { pick: 0, round: 0 })).status).toBe(401)
+    expect((await send(web, 'POST', '/api/door', forged, { pick: 0, layout: '0'.repeat(16) })).status).toBe(401)
   })
 
   it('a slot outside the six or a tap without its layout is refused and spends nothing', async () => {
-    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 6, round: 0 })).status).toBe(422)
-    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: '1', round: 0 })).status).toBe(422)
+    const layout = layoutOf(await door())
+    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 6, layout })).status).toBe(422)
+    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: '1', layout })).status).toBe(422)
     expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 1 })).status).toBe(422)
-    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 1, round: 2 })).status).toBe(422)
+    expect((await send(web, 'POST', '/api/door', guardInit(DORA, 'q-10'), { pick: 1, layout: 'zz' })).status).toBe(422)
     expect((await door()).misses).toBe(0)
   })
 })
@@ -345,7 +358,7 @@ describe('F36: time, the daily limit and the admins', () => {
     for (const q of ['a', 'b', 'c']) {
       await h.send(joinRequest({ query: q }))
       await tap(guardInit(DORA, q), missAt(await door()))
-      await tap(guardInit(DORA, q), missAt(await door()), undefined, 1)
+      await tap(guardInit(DORA, q), missAt(await door()))
     }
     h.tg.calls.length = 0
     await h.send(joinRequest({ query: 'd' }))
@@ -363,7 +376,7 @@ describe('F36: time, the daily limit and the admins', () => {
     for (const q of ['a', 'b', 'c']) {
       await h.send(joinRequest({ query: q }))
       await tap(guardInit(DORA, q), missAt(await door()))
-      await tap(guardInit(DORA, q), missAt(await door()), undefined, 1)
+      await tap(guardInit(DORA, q), missAt(await door()))
     }
     for (const q of ['d', 'e', 'f']) {
       h.clock.advance(7 * 3600_000)
@@ -404,7 +417,7 @@ describe('F36: an old answer never reaches a newer request of the same person', 
     h.tg.fail('declineChatJoinRequest', tgError.server())
     await h.send(joinRequest({ query: null }))
     await tap(initData(DORA), missAt(await door()), (await door()).token)
-    await tap(initData(DORA), missAt(await door()), (await door()).token, 1)
+    await tap(initData(DORA), missAt(await door()), (await door()).token)
   })
 
   it('an unsent refusal is dropped when the person sends a new request', async () => {
@@ -418,6 +431,29 @@ describe('F36: an old answer never reaches a newer request of the same person', 
     await h.app.tick()
     expect(h.tg.count('declineChatJoinRequest')).toBe(1)
     expect((await door()).status).toBe('pending')
+  })
+
+  it('the door was switched off meanwhile: the new request still drops the old refusal', async () => {
+    const old = await door()
+    await changeSetting(h.db, { chatId: CHAT, key: 'join_gate', value: false, baseVersion: 1, actor: ADMIN.id, now: h.clock.now() })
+    await h.send(joinRequest({ query: 'q-off-2' }))
+    expect((await h.db.query('SELECT send FROM gate_checks WHERE check_id = $1', [old.check_id]))[0].send).toBe('skipped')
+    h.clock.advance(10 * 60_000)
+    await h.app.tick()
+    expect(h.tg.count('declineChatJoinRequest')).toBe(1)
+    expect(h.tg.of('answerChatJoinRequestQuery').map((c) => c.args)).toEqual([['q-off-2', 'queue']])
+  })
+
+  it('a sender holding the lease when the new request came does not call by the pair (door off: no newer check to see)', async () => {
+    const old = await door()
+    await h.db.query(`UPDATE gate_checks SET send = 'sending', send_until = $2, send_tries = 2 WHERE check_id = $1`, [old.check_id, new Date(h.clock.now().getTime() + 30_000)])
+    const held = (await h.db.query('SELECT * FROM gate_checks WHERE check_id = $1', [old.check_id]))[0]
+    await changeSetting(h.db, { chatId: CHAT, key: 'join_gate', value: false, baseVersion: 1, actor: ADMIN.id, now: h.clock.now() })
+    await h.send(joinRequest({ query: null }))
+    expect((await h.db.query('SELECT count(*)::int AS n FROM gate_checks')).at(0)!.n).toBe(1)
+    await sendOne(h.ctx, held)
+    expect(h.tg.count('declineChatJoinRequest')).toBe(1)
+    expect((await h.db.query('SELECT send FROM gate_checks WHERE check_id = $1', [old.check_id]))[0].send).toBe('skipped')
   })
 
   it('a refusal whose lease ran out is not sent by the pair once a newer request is there', async () => {
@@ -457,6 +493,16 @@ describe('F36: a window nobody opened', () => {
     expect(h.tg.calls).toEqual([])
   })
 
+  it('recovered with less than a minute left of the check: no window, the admins decide, nobody declines', async () => {
+    await changeSetting(h.db, { chatId: CHAT, key: 'join_gate_minutes', value: 2, baseVersion: 0, actor: ADMIN.id, now: h.clock.now() })
+    h.clock.advance(70_000)
+    await h.app.tick({ scheduled: true })
+    const check = await door()
+    expect([check.status, check.reason, check.door, check.send]).toEqual(['gone', 'door_failed', 'lost', 'none'])
+    await h.app.settle()
+    expect(h.tg.calls).toEqual([])
+  })
+
   it('an opening cut off in the middle: the silence of the window is not declined', async () => {
     await h.db.query(`UPDATE gate_checks SET door = 'opening'`)
     h.clock.advance(11 * 60_000)
@@ -474,7 +520,7 @@ describe('F36: the monitor line', () => {
     await tap(guardInit(DORA, 'm1'), frogAt(await door()))
     await h.send(joinRequest({ from: EVE, query: 'm2' }))
     await tap(guardInit(EVE, 'm2'), missAt(await door(EVE)))
-    await tap(guardInit(EVE, 'm2'), missAt(await door(EVE)), undefined, 1)
+    await tap(guardInit(EVE, 'm2'), missAt(await door(EVE)))
     const report = await buildReport(h.db, new Date(h.clock.now().getTime() + 1000))
     const chat = report.chats.find((c) => c.chatId === CHAT)!
     expect(chat.gate).toEqual({ passed: 1, missed: 1, timeout: 0, limit: 0, admins: 0, noWindow: 0, sendFailed: 0 })

@@ -246,7 +246,7 @@ describe('the appeal through the API', () => {
     expect(await json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, {}))).toEqual({ status: 'check_required' })
     expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toMatchObject({ state: 'open' })
     const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal'`))[0].puzzle.slots as string[]
-    const response = await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.indexOf('frog'), round: 0 })
+    const response = await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.indexOf('frog'), layout: (await h.db.query(`SELECT puzzle FROM gate_checks WHERE purpose = 'appeal' AND status = 'pending' ORDER BY check_id DESC LIMIT 1`))[0].puzzle.id })
     expect(await response.json()).toEqual({ status: 'accepted', lifted: true })
     expect(h.jev.requests).toEqual([])
     expect(await karmaOf(h, ALICE.id)).toBe(12.5)
@@ -257,23 +257,30 @@ describe('the appeal through the API', () => {
     await h.db.query('UPDATE members SET bans_count = 1 WHERE user_id = 3 AND chat_id = $1', [CHAT])
     const check = await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))
     expect((check.puzzle as unknown[]).length).toBe(6)
-    expect(check.round).toBe(0)
+    const first = check.layout as string
+    expect(first).toMatch(/^[0-9a-f]{16}$/)
     const pending = async () => (await h.db.query(`SELECT puzzle, misses FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal' AND status = 'pending'`))[0]
     const miss = async () => {
       const row = await pending()
       const slots = row.puzzle.slots as string[]
-      return json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.findIndex((k) => k !== 'frog'), round: Number(row.misses) }))
+      return json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.findIndex((k) => k !== 'frog'), layout: row.puzzle.id }))
     }
-    expect(await miss()).toMatchObject({ status: 'check_miss', round: 1 })
+    const missed = await miss()
+    expect(missed.status).toBe('check_miss')
+    expect(missed.layout).not.toBe(first)
     // A tap made on the first layout (another screen) spends nothing.
-    const stale = await json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: 0, round: 0 }))
-    expect(stale).toMatchObject({ status: 'check_stale', round: 1 })
+    const stale = await json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: 0, layout: first }))
+    expect(stale).toMatchObject({ status: 'check_stale', layout: missed.layout })
     expect((await pending()).misses).toBe(1)
+    const last = missed.layout as string
     expect(await miss()).toEqual({ status: 'check_failed' })
     expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toEqual({ state: 'wait' })
     expect(await json(await get(web, '/api/appeal', VECTORS.carol_appeal))).toEqual({ status: 'none', allowed: true })
     h.clock.advance(10 * 60_000 + 1000)
     expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toMatchObject({ state: 'open' })
+    // A tap left on the window of the failed check does not spend a try of the new one.
+    expect(await json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: 0, layout: last }))).toMatchObject({ status: 'check_stale' })
+    expect((await pending()).misses).toBe(0)
     expect(h.tg.count('restrictChatMember')).toBe(0)
   })
 })
