@@ -3,6 +3,7 @@ import { registerCardActionFlows } from './card-actions.js'
 import { deliverCards } from './cards.js'
 import type { Ctx } from './ctx.js'
 import { processEvaluations } from './evaluation.js'
+import { expireChecks, sendDecisions } from './gate.js'
 import { runFlows } from './flows.js'
 import { recoverImports, runImports } from './import.js'
 import { recoverStaleOps, runDueOps } from './ops.js'
@@ -39,6 +40,7 @@ export function createApp(ctx: Ctx): App {
     await runDigest(ctx)
     await runRetention(ctx)
     await runTagPlacement(ctx)
+    await expireChecks(ctx)
   }
 
   async function tick(options: { scheduled?: boolean } = {}): Promise<number> {
@@ -49,8 +51,10 @@ export function createApp(ctx: Ctx): App {
     work += await runDueOps(ctx)
     work += await deliverCards(ctx)
     work += await runImports(ctx)
+    work += await sendDecisions(ctx)
     if (options.scheduled) {
       await scheduled()
+      work += await sendDecisions(ctx)
       work += await runFlows(ctx)
       work += await runDueOps(ctx)
       work += await deliverCards(ctx)

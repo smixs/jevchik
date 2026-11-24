@@ -36,6 +36,18 @@ export interface ChatReport {
   cannotAct: { kind: string; code: string; count: number }[]
   autoThreshold: number
   reviewThreshold: number
+  /** Section 3.6.8: the door, when it is on in the chat or decided anything in the window. */
+  gate?: GateCounts
+}
+
+interface GateCounts {
+  passed: number
+  missed: number
+  timeout: number
+  limit: number
+  admins: number
+  noWindow: number
+  sendFailed: number
 }
 
 export interface MonitorReport {
@@ -225,6 +237,22 @@ async function proposalsFor(q: Q, chat: ChatReport, to: Date): Promise<string[]>
   return out
 }
 
+/** Section 3.6.8: what the door decided in the window, by the time of the decision. */
+async function gateCounts(q: Q, chatId: number, from: Date, to: Date): Promise<GateCounts> {
+  const rows = await q.query<GateCounts>(
+    `SELECT count(*) FILTER (WHERE status = 'passed')::int AS passed,
+            count(*) FILTER (WHERE status = 'failed' AND reason = 'missed')::int AS missed,
+            count(*) FILTER (WHERE status = 'timeout')::int AS timeout,
+            count(*) FILTER (WHERE status = 'failed' AND reason = 'daily_limit')::int AS "limit",
+            count(*) FILTER (WHERE status = 'gone' AND reason = 'joined')::int AS admins,
+            count(*) FILTER (WHERE status = 'gone' AND reason = 'door_failed')::int AS "noWindow",
+            count(*) FILTER (WHERE send = 'failed')::int AS "sendFailed"
+     FROM gate_checks WHERE chat_id = $1 AND purpose = 'join' AND decided_at >= $2 AND decided_at < $3`,
+    [chatId, from, to],
+  )
+  return rows[0]
+}
+
 export async function buildReport(q: Q, to: Date, from = new Date(to.getTime() - DAY_MS)): Promise<MonitorReport> {
   const chats = await q.query<{ chat_id: number; title: string | null }>(`SELECT chat_id, title FROM chats ORDER BY chat_id`)
   const manual = await withTexts(q, await manualCases(q, from, to))
@@ -243,7 +271,10 @@ export async function buildReport(q: Q, to: Date, from = new Date(to.getTime() -
        GROUP BY 1, 2 ORDER BY 3 DESC`,
       [c.chat_id, REMOVING_OPS, from, to],
     )
+    const gate = await gateCounts(q, c.chat_id, from, to)
+    const gateShown = settings.bool('join_gate') || Object.values(gate).some((v) => v > 0)
     reports.push({
+      ...(gateShown ? { gate } : {}),
       chatId: c.chat_id,
       title: c.title ?? String(c.chat_id),
       auto: { steam: n('steam'), spamDelete: n('spam_delete'), ban: n('ban') },
@@ -262,8 +293,9 @@ export async function buildReport(q: Q, to: Date, from = new Date(to.getTime() -
   const proposals: string[] = []
   for (const r of reports) proposals.push(...(await proposalsFor(q, r, to)))
   const stuckEvaluations = stuck[0]?.n ?? 0
-  const red = stuckEvaluations > 0 || reports.some((r) => r.cannotAct.length > 0)
-  const yellow = reports.some((r) => r.manual.length + r.falseAlarms.length + r.openReview.length > 0) || proposals.length > 0
+  const red = stuckEvaluations > 0 || reports.some((r) => r.cannotAct.length > 0 || (r.gate?.sendFailed ?? 0) > 0)
+  const yellow =
+    reports.some((r) => r.manual.length + r.falseAlarms.length + r.openReview.length > 0 || (r.gate?.noWindow ?? 0) > 0) || proposals.length > 0
   return { from, to, chats: reports, stuckEvaluations, proposals, color: red ? '🔴' : yellow ? '🟡' : '🟢' }
 }
 
@@ -283,6 +315,13 @@ function list(cases: Case[]): string[] {
 
 const OP_WORDS: Record<string, string> = { delete_message: 'удалить сообщение', restrict: 'заглушить', ban: 'забанить' }
 
+function gateLine(g: GateCounts): string {
+  const refused = g.missed + g.timeout + g.limit
+  const extra = [g.admins > 0 && `админы пустили сами ${g.admins}`, g.noWindow > 0 && `окно не открылось ${g.noWindow}`, g.sendFailed > 0 && `Telegram не принял ответ ${g.sendFailed}`]
+  const tail = extra.filter(Boolean).join(', ')
+  return `Вход: пустил ${g.passed}, отказ ${refused} (промах ${g.missed}, молчал ${g.timeout}, лимит ${g.limit})${tail ? `; ${tail}` : ''}.`
+}
+
 export function renderReport(r: MonitorReport): string {
   const manual = r.chats.reduce((s, c) => s + c.manual.length, 0)
   const alarms = r.chats.reduce((s, c) => s + c.falseAlarms.length, 0)
@@ -297,6 +336,7 @@ export function renderReport(r: MonitorReport): string {
   for (const c of r.chats) {
     lines.push(`## ${c.title}`)
     lines.push(`Сам: парилка ${c.auto.steam}, удалено без парилки ${c.auto.spamDelete}, бан после парилки ${c.auto.ban}. Порог автоудаления ${pct(c.autoThreshold)}, карточки от ${pct(c.reviewThreshold)}.`)
+    if (c.gate) lines.push(gateLine(c.gate))
     if (c.cannotAct.length > 0) lines.push(`Не смог: ${c.cannotAct.map((o) => `${OP_WORDS[o.kind] ?? o.kind} - ${o.count} (${o.code || 'ошибка'})`).join(', ')}.`)
     if (c.manual.length > 0) lines.push(`Руками (${c.manual.length}):`, ...list(c.manual))
     if (c.falseAlarms.length > 0) lines.push(`Ложные (${c.falseAlarms.length}):`, ...list(c.falseAlarms))

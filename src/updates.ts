@@ -3,6 +3,7 @@ import { handleCallback } from './callbacks.js'
 import type { Ctx } from './ctx.js'
 import type { Q } from './db.js'
 import { enqueueEvaluation } from './evaluation.js'
+import { joinedChat, receiveJoinRequest } from './gate.js'
 import { senderHistory } from './jev/history.js'
 import type { JevState } from './jev/state.js'
 import type { MediaRef } from './media.js'
@@ -278,7 +279,10 @@ async function handleMembership(ctx: Ctx, q: Q, update: Update): Promise<void> {
   const user = change.new_chat_member.user
   if (user.is_bot) return
   await upsertMember(q, change.chat.id, user, now)
-  if (OUTSIDE.has(change.old_chat_member.status) && INSIDE.has(change.new_chat_member.status)) await markJoined(q, change.chat.id, user, now)
+  if (OUTSIDE.has(change.old_chat_member.status) && INSIDE.has(change.new_chat_member.status)) {
+    await markJoined(q, change.chat.id, user, now)
+    await joinedChat(q, change.chat.id, user.id, now)
+  }
   // A new role lifts the "not subject to a tag" mark set for an administrator (section 3.12); a tag a person set stays theirs.
   const liftAdmin = `CASE WHEN tag_exempt = 'target_admin' AND $3 NOT IN ('administrator', 'creator') THEN NULL ELSE tag_exempt END`
   await q.query(`UPDATE members SET status = $3, tag_exempt = ${liftAdmin} WHERE chat_id = $1 AND user_id = $2`, [
@@ -301,6 +305,7 @@ async function route(ctx: Ctx, q: Q, update: Update, posts: Post[]): Promise<voi
     const r = update.message_reaction_count
     await handleReactionCount(q, await getSettings(q, r.chat.id), r, now)
   } else if (update.chat_member || update.my_chat_member) await handleMembership(ctx, q, update)
+  else if (update.chat_join_request) await receiveJoinRequest(ctx, q, update.chat_join_request, posts)
   else if (update.callback_query) {
     const callback = update.callback_query
     posts.push(() => handleCallback(ctx, callback))
