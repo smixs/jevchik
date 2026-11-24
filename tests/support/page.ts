@@ -31,10 +31,10 @@ export interface Site {
 }
 
 /** Motion is reduced by default, so no test depends on an animation; `motion: true` opens the page as a person without that setting. */
-export async function openPage(site: Site, initData: string, options: { patch?: Patch; motion?: boolean } = {}): Promise<Page> {
+export async function openPage(site: Site, initData: string, options: { patch?: Patch; motion?: boolean; path?: string } = {}): Promise<Page> {
   const { base, bundle } = site
-  const { patch, motion = false } = options
-  const window = new Window({ url: `${base}/`, settings: { device: { prefersReducedMotion: motion ? 'no-preference' : 'reduce' } } })
+  const { patch, motion = false, path = '/' } = options
+  const window = new Window({ url: `${base}${path}`, settings: { device: { prefersReducedMotion: motion ? 'no-preference' : 'reduce' } } })
   const haptics: string[] = []
   const HapticFeedback = {
     impactOccurred: (style: string) => haptics.push(`impact:${style}`),
@@ -42,7 +42,7 @@ export async function openPage(site: Site, initData: string, options: { patch?: 
     selectionChanged: () => haptics.push('selection'),
   }
   const opened: string[] = []
-  const telegram = { WebApp: { initData, ready: () => {}, expand: () => {}, HapticFeedback, openTelegramLink: (url: string) => opened.push(url) } }
+  const telegram = { WebApp: { initData, ready: () => {}, expand: () => {}, close: () => opened.push('close'), HapticFeedback, openTelegramLink: (url: string) => opened.push(url) } }
   ;(window as unknown as { Telegram: unknown }).Telegram = telegram
   if (patch) {
     const real = window.fetch.bind(window)

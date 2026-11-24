@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { appealState, submitAppeal } from '../appeal.js'
+import { appealCheck, appealPick, doorView, findDoor, pick } from '../gate.js'
 import { renderCard, type CardRow } from '../card-text.js'
 import type { Ctx } from '../ctx.js'
 import type { Row } from '../db.js'
@@ -7,7 +8,7 @@ import { startImport } from '../import.js'
 import { observationEnd } from '../members.js'
 import { modLog, moderate, requestUnban, sanctionOf, type ModAction } from '../moderation.js'
 import { changeSetting, getSettings, getSettingsWithVersions, listAudit, SCHEMA, SettingsError } from '../settings/settings.js'
-import { parseContext, verifyInitData, type Screen } from './auth.js'
+import { doorFields, parseContext, verifyInitData, type Screen } from './auth.js'
 import { banList, EMPTY_PAGE, leaderboard, memberPage, parsePeriod } from './queries.js'
 import { readStatic } from './static.js'
 import { IMPORT_MAX_BYTES } from '../import.js'
@@ -31,7 +32,7 @@ interface Viewer {
   name: string
 }
 
-type Env = { Variables: { auth: Auth; viewer: Viewer } }
+type Env = { Variables: { auth: Auth; viewer: Viewer; initRaw: string } }
 
 function isDbDown(error: unknown): boolean {
   const e = error as { code?: string; message?: string }
@@ -139,7 +140,9 @@ function mountBase(app: Api, ctx: Ctx, options: WebOptions): void {
     if (!result.ok) return c.json({ error: 'unauthorized', reason: result.reason }, 401)
     const viewer = { userId: result.user.id, name: [result.user.first_name, result.user.last_name].filter(Boolean).join(' ') }
     c.set('viewer', viewer)
-    if (c.req.path === '/api/chats') return next()
+    c.set('initRaw', raw as string)
+    // The chats list and the door (section 3.6.8) need only the signature: the person at the door is not in the chat yet.
+    if (c.req.path === '/api/chats' || c.req.path === '/api/door') return next()
     const context = await resolveContext(ctx, { startParam: result.startParam, named: c.req.header('x-chat-id'), userId: viewer.userId })
     if ('error' in context) return c.json({ error: context.error }, context.status)
     c.set('auth', { ...viewer, chatId: context.chatId, screen: context.screen })
@@ -172,6 +175,36 @@ async function viewerIsAdmin(ctx: Ctx, auth: { chatId: number; userId: number })
 async function viewerHasBan(ctx: Ctx, auth: { chatId: number; userId: number }): Promise<boolean> {
   const rows = await ctx.db.query('SELECT 1 FROM bans WHERE chat_id = $1 AND user_id = $2', [auth.chatId, auth.userId])
   return rows.length > 0
+}
+
+/** Section 3.6.8: a slot of the six animals. */
+function readPick(body: unknown): number | null {
+  const index = (body as { pick?: unknown } | null)?.pick
+  return typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < 6 ? index : null
+}
+
+/** The press would lift an automatic sanction now: then the frog is asked first. */
+function needsCheck(state: { status: string; allowed: boolean; source?: string }): boolean {
+  return state.allowed && state.status === 'none' && state.source !== 'admin'
+}
+
+/** Section 3.6.8: the window of the door, for the guard (initData) and for the private message (token in the address). */
+function mountDoor(app: Api, ctx: Ctx): void {
+  const find = async (c: Context<Env>) =>
+    findDoor(ctx, { userId: c.get('viewer').userId, queryId: doorFields(c.get('initRaw')).queryId, token: c.req.header('x-door-token') ?? null })
+
+  app.get('/api/door', async (c) => c.json(await doorView(ctx, await find(c))))
+
+  app.post('/api/door', async (c) => {
+    const index = readPick(await c.req.json().catch(() => null))
+    if (index === null) return c.json({ error: 'invalid' }, 422)
+    const check = await find(c)
+    if (!check) return c.json(await doorView(ctx, null))
+    const result = await pick(ctx, check, index)
+    if (result.result === 'miss') return c.json(await doorView(ctx, result.check, true))
+    const now = (await ctx.db.query('SELECT * FROM gate_checks WHERE check_id = $1', [check.check_id]))[0]
+    return c.json(await doorView(ctx, now ?? null))
+  })
 }
 
 function mountPublic(app: Api, ctx: Ctx): void {
@@ -224,9 +257,27 @@ function mountPublic(app: Api, ctx: Ctx): void {
     return c.json(await appealState(ctx, auth.chatId, auth.userId))
   })
 
-  /** Section 3.6: the button lifts an automatic sanction at once, without an explanation. */
+  /** Section 3.6.8: the check with the frog before the button; a press already accepted resumes without it. */
+  app.get('/api/appeal/check', async (c) => {
+    const auth = c.get('auth')
+    if (!needsCheck(await appealState(ctx, auth.chatId, auth.userId))) return c.json({ state: 'none' })
+    return c.json(await appealCheck(ctx, auth.chatId, auth.userId))
+  })
+
+  /**
+   * Section 3.6: the button lifts an automatic sanction at once, without an explanation; since 24.11 (section 3.6.8) only
+   * with the frog found in the check. Without a sanction to lift the answer is the button's own.
+   */
   app.post('/api/appeal', async (c) => {
     const auth = c.get('auth')
+    if (needsCheck(await appealState(ctx, auth.chatId, auth.userId))) {
+      const index = readPick(await c.req.json().catch(() => null))
+      if (index === null) return c.json({ status: 'check_required' })
+      const result = await appealPick(ctx, auth.chatId, auth.userId, index)
+      if (result.result === 'miss') return c.json({ status: 'check_miss', puzzle: result.puzzle })
+      if (result.result === 'failed') return c.json({ status: 'check_failed' })
+      if (result.result === 'none') return c.json({ status: 'check_required' })
+    }
     return c.json(await submitAppeal(ctx, auth.chatId, auth.userId))
   })
 
@@ -419,6 +470,7 @@ function mountStatic(app: Api, options: WebOptions): void {
 export function createWebApp(ctx: Ctx, options: WebOptions): Hono<Env> {
   const app = new Hono<Env>()
   mountBase(app, ctx, options)
+  mountDoor(app, ctx)
   mountPublic(app, ctx)
   mountAdmin(app, ctx)
   mountModeration(app, ctx)

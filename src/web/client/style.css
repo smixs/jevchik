@@ -217,3 +217,13 @@ button.danger{min-height:var(--tap);display:inline-flex;align-items:center;justi
 [data-field=member_results] .who{flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
 [data-field=member_results] .hint{white-space:normal;text-align:left}
 .ban-card h2{overflow-wrap:anywhere}
+
+/* Section 3.6.8: the door and the six animals */
+body.at-door{padding-bottom:calc(var(--safe-bottom) + var(--s4))}
+.door{display:flex;flex-direction:column;align-items:center;gap:var(--s3);text-align:center;padding:var(--s5) var(--s4)}
+.door p{max-width:34ch;margin:0}
+.beasts{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s3);width:100%;max-width:360px}
+.beast-tile{aspect-ratio:1;display:flex;align-items:center;justify-content:center;padding:var(--s3);border:2px solid var(--line);border-radius:var(--r-m);background:var(--surface-2);transition:transform 120ms ease,border-color 120ms ease}
+.beast-tile:active{transform:scale(.94);border-color:var(--accent)}
+.beast-tile[disabled]{opacity:.55}
+.beast{width:100%;height:100%;image-rendering:pixelated}

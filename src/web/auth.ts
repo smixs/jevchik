@@ -62,6 +62,24 @@ export function verifyInitData(raw: string | undefined | null, botToken: string,
   return { ok: true, user, startParam: fields.get('start_param') ?? null, authDate }
 }
 
+/**
+ * Section 3.6.8: what the window of the guard gets besides the user: the join request query and the chat. Read only from
+ * initData whose signature was already checked.
+ */
+export function doorFields(raw: string): { queryId: string | null; chatId: number | null } {
+  const fields = new Map(dataCheckString(raw)?.pairs ?? [])
+  return { queryId: fields.get('chat_join_request_query_id') ?? null, chatId: chatIdOf(fields.get('chat')) }
+}
+
+function chatIdOf(raw: string | undefined): number | null {
+  try {
+    const chat = JSON.parse(raw ?? 'null') as { id?: unknown } | null
+    return typeof chat?.id === 'number' ? chat.id : null
+  } catch {
+    return null
+  }
+}
+
 export type Screen = 'lb' | 'me' | 'bans' | 'appeal' | 'admin'
 
 export function parseContext(startParam: string | null): { screen: Screen; chatId: number } | null {

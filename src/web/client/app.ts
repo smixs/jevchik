@@ -9,6 +9,7 @@ interface TelegramWebApp {
   setHeaderColor?: (color: string) => void
   setBackgroundColor?: (color: string) => void
   openTelegramLink?: (url: string) => void
+  close?: () => void
 }
 
 declare global {
@@ -494,29 +495,147 @@ function requestScreen(state: Dict): Child[] {
   return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, h('p', { 'data-field': 'sanction' }, `Вы ${s(state.sanction)}.`), h('p', { class: 'hint' }, 'Это решение админа. Снять его может только админ; попросить можно один раз.'), asked ? h('p', { 'data-field': 'appeal_state' }, REQUEST_TEXT[s(state.status)] ?? 'Просьба недоступна.') : ask, result)]
 }
 
-/** Section 3.6 (decision of the owner 29.10): one button lifts the automatic sanction, nothing to explain. */
+/**
+ * Section 3.6 (decision of the owner 29.10): one button lifts the automatic sanction, nothing to explain. Since 24.11
+ * (section 3.6.8) the button first asks for the frog among six animals.
+ */
 async function appealScreen(): Promise<Child[]> {
   const state = await api('/api/appeal')
   if (state.source === 'admin') return requestScreen(state)
   const result = h('p', { 'data-field': 'appeal_result', role: 'status' })
   const send = h('button', { class: 'primary', 'data-action': 'unban' }, 'Разбанить меня')
+  const card = h('section', { class: 'card' }, state.allowed === false ? h('p', { 'data-field': 'appeal_state' }, APPEAL_TEXT[s(state.status)] ?? 'Разбан недоступен.') : send, result)
+  let grid: HTMLElement | null = null
+  const fail = (): void => {
+    result.textContent = 'Не получилось, попробуйте позже.'
+    send.removeAttribute('disabled')
+    juice.failed(result)
+  }
+  const refuse = (text: string): void => {
+    grid?.remove()
+    grid = null
+    result.textContent = text
+    send.removeAttribute('disabled')
+    juice.appealRefused(result)
+  }
+  const showCheck = (puzzle: Dict[], note: string): void => {
+    const next = beasts(puzzle, (index) => press({ pick: index }))
+    if (grid) grid.replaceWith(next)
+    else card.insertBefore(next, result)
+    grid = next
+    result.textContent = note
+  }
+  const answered = (r: Dict): void => {
+    const status = s(r.status)
+    if (status === 'check_miss') return showCheck(list(r.puzzle), 'Мимо. Звери перемешались, последняя попытка.')
+    if (status === 'check_failed') return refuse('Проверка не пройдена. Попробуйте через 10 минут.')
+    if (status === 'check_required') return startCheck()
+    grid?.remove()
+    grid = null
+    const retry = status === 'accepted' && r.lifted !== true
+    result.textContent = status === 'accepted' ? (retry ? 'Принято, ограничение снимается. Если через минуту не снято, нажмите ещё раз.' : 'Готово, ограничение снято. Первые сообщения проверяются строже.') : (APPEAL_TEXT[status] ?? 'Готово.')
+    if (retry) send.removeAttribute('disabled')
+    appealFeel(status, r.lifted === true, send, result)
+  }
+  const press = (body?: Dict): void => {
+    const init: RequestInit = body ? { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } } : { method: 'POST' }
+    void api('/api/appeal', init).then(answered).catch(fail)
+  }
+  const startCheck = (): void => {
+    void api('/api/appeal/check')
+      .then((check) => {
+        const at = s(check.state)
+        if (at === 'open') return showCheck(list(check.puzzle), 'Сначала тыкните в лягушонка: так Жевчик отличает людей от спам-ботов.')
+        if (at === 'wait') return refuse('Проверка не пройдена. Попробуйте через 10 минут.')
+        press()
+      })
+      .catch(fail)
+  }
   send.addEventListener('click', () => {
     send.setAttribute('disabled', '')
-    void api('/api/appeal', { method: 'POST' })
-      .then((r) => {
-        const status = s(r.status)
-        const retry = status === 'accepted' && r.lifted !== true
-        result.textContent = status === 'accepted' ? (retry ? 'Принято, ограничение снимается. Если через минуту не снято, нажмите ещё раз.' : 'Готово, ограничение снято. Первые сообщения проверяются строже.') : (APPEAL_TEXT[status] ?? 'Готово.')
-        if (retry) send.removeAttribute('disabled')
-        appealFeel(status, r.lifted === true, send, result)
-      })
+    startCheck()
+  })
+  return [h('h1', {}, 'Разбан'), card]
+}
+
+// ---------------------------------------------------------------- the door (section 3.6.8)
+
+/** One animal as pixels: each run of one colour in a row is one rectangle. No name of the animal goes into the markup. */
+function spriteSvg(sprite: Dict): string {
+  const rows = (Array.isArray(sprite.rows) ? sprite.rows : []).map(s)
+  const palette = dict(sprite.palette)
+  let rects = ''
+  rows.forEach((row, y) => {
+    for (const run of row.matchAll(/([^.])\1*/g)) {
+      const color = s(palette[run[1]])
+      if (/^#[0-9a-f]{6}$/i.test(color)) rects += `<rect x="${run.index}" y="${y}" width="${run[0].length}" height="1" fill="${color}"/>`
+    }
+  })
+  return `<svg class="beast" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true" focusable="false">${rects}</svg>`
+}
+
+/** Six tiles; a tap gives the slot to `onPick`, and every tile waits for the answer. */
+function beasts(puzzle: Dict[], onPick: (index: number) => void): HTMLElement {
+  const grid = h('div', { class: 'beasts', role: 'group', 'aria-label': 'Найдите лягушонка', 'data-field': 'beasts' })
+  puzzle.forEach((sprite, index) => {
+    const tile = h('button', { class: 'beast-tile', 'data-slot': String(index), 'aria-label': `Зверь ${index + 1}` })
+    tile.innerHTML = spriteSvg(sprite)
+    tile.addEventListener('click', () => {
+      for (const other of Array.from(grid.children)) other.setAttribute('disabled', '')
+      onPick(index)
+    })
+    grid.append(tile)
+  })
+  return grid
+}
+
+const DOOR_TEXT: Record<string, string> = {
+  passed: 'Пустил. Заходи и веди себя прилично 🐸',
+  failed: 'Не пустил: лягушонка с другим зверем перепутать - это надо уметь. Заявку можно подать ещё раз.',
+  timeout: 'Время вышло, заявку я закрыл. Подай её заново, если ты человек.',
+  gone: 'Эта заявка уже решена.',
+  unknown: 'Не нашёл эту заявку. Подай её заново.',
+}
+
+/** `?door=guard` comes from the guard window (the request is in initData); any other value is the token of the private message. */
+const doorParam = new URLSearchParams(location.search).get('door')
+
+async function doorApi(init: RequestInit = {}): Promise<Dict> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (doorParam && doorParam !== 'guard') headers['X-Door-Token'] = doorParam
+  return api('/api/door', { ...init, headers })
+}
+
+function doorScreen(view: Dict): Child[] {
+  const state = s(view.state)
+  const mascot = picture('/img/mascot.webp', 'mascot', 112)
+  const status = h('p', { class: 'hint', role: 'status', 'data-field': 'door_result' })
+  const head = h('h1', {}, 'Жевчик на дверях')
+  if (state !== 'open') {
+    status.textContent = DOOR_TEXT[state] ?? DOOR_TEXT.unknown
+    if (state === 'passed') setTimeout(() => webApp?.close?.(), 2500)
+    return [h('section', { class: 'door', 'data-field': 'door', 'data-state': state }, mascot, head, status)]
+  }
+  if (view.missed === true) status.textContent = 'Мимо. Это не лягушонок. Звери перемешались, последняя попытка.'
+  const grid = beasts(list(view.puzzle), (index) => {
+    void doorApi({ method: 'POST', body: JSON.stringify({ pick: index }) })
+      .then((next) => render(async () => doorScreen(next)))
       .catch(() => {
-        result.textContent = 'Не получилось, попробуйте позже.'
-        send.removeAttribute('disabled')
-        juice.failed(result)
+        status.textContent = 'Связь подвела, тыкни ещё раз.'
+        for (const tile of Array.from(grid.children)) tile.removeAttribute('disabled')
       })
   })
-  return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, state.allowed === false ? h('p', { 'data-field': 'appeal_state' }, APPEAL_TEXT[s(state.status)] ?? 'Разбан недоступен.') : send, result)]
+  const ask = h('p', {}, `Это вход в «${s(view.title)}». Тыкни в лягушонка - и заходи. Спамеры почему-то всегда тыкают в утку.`)
+  return [h('section', { class: 'door', 'data-field': 'door', 'data-state': 'open' }, mascot, head, ask, grid, status)]
+}
+
+function bootDoor(): void {
+  topBar.setAttribute('hidden', '')
+  nav.setAttribute('hidden', '')
+  document.body.classList.add('at-door')
+  void doorApi()
+    .then((view) => render(async () => doorScreen(view)))
+    .catch((error: unknown) => void render(async () => [failure(error)]))
 }
 
 // ---------------------------------------------------------------- admin
@@ -798,6 +917,7 @@ function boot(): void {
   webApp?.ready?.()
   webApp?.expand?.()
   paintTelegram()
+  if (doorParam) return bootDoor()
   void api('/api/context').then(enter).catch((error: unknown) => {
       if (error instanceof ApiError && s(error.body.error) === 'no_context') return void chooseChat()
       void render(async () => [failure(error)])
