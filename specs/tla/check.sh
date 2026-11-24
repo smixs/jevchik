@@ -1,5 +1,5 @@
 #!/bin/sh
-# Модель разбана под TLC: Appeal - без ошибок, мутанты обязаны нарушить свой инвариант.
+# Модели разбана, настроек и входа по заявке под TLC: Appeal, Settings, Gate - без ошибок, мутанты обязаны нарушить свой инвариант.
 # Несовпадение ожидания или сбой tlc - ненулевой выход.
 set -u
 cd "$(dirname "$0")" || exit 2
@@ -29,5 +29,8 @@ check Settings none Settings
 check Settings-noversion OneVersion Settings
 check Settings-noaudit AuditAtomic Settings
 check Settings-allchats ChatIsolation Settings
+check Gate none Gate
+check Gate-nocas SentMatches Gate
+check Gate-nofallback NoHanging Gate
 echo "check: $ok ok, $failed failed"
 [ "$failed" -eq 0 ]
