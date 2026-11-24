@@ -32,10 +32,15 @@ const DOOR_LOST_MS = 15_000
 const APPEAL_COOLDOWN_MS = 10 * 60_000
 /** An untouched check of the appeal button closes after this long. */
 const APPEAL_CHECK_MS = 30 * 60_000
-/** Telegram's answers that mean the request is no longer there to decide: the send is over. */
-const SETTLED = /HIDE_REQUESTER_MISSING|USER_ALREADY_PARTICIPANT|REQUEST_NOT_FOUND|already (a )?(participant|member)|not found/i
+/** Telegram's answers that end the send: the person is in already, or the request is no longer there. */
+const PARTICIPANT = /USER_ALREADY_PARTICIPANT|already (a )?(participant|member)/i
+const MISSING = /HIDE_REQUESTER_MISSING|REQUEST_NOT_FOUND|not found/i
+/** A window opened later than this before the end of its check is not opened: the person would have no time to answer. */
+const DOOR_MIN_LEFT_MS = 60_000
 
 interface Puzzle {
+  /** The name of this layout: a tap names the layout it was made on, so a tap on an old window or an old check spends nothing. */
+  id: string
   slots: Kind[]
   flips: boolean[]
   shades: number[]
@@ -48,8 +53,8 @@ export interface DoorView {
   state: DoorState
   title?: string
   puzzle?: Sprite[]
-  /** The number of the layout: a tap names the layout it was made on, a tap on an old one changes nothing. */
-  round?: number
+  /** The name of the layout: a tap names the layout it was made on, a tap on an old one changes nothing. */
+  layout?: string
   missed?: boolean
 }
 
@@ -64,7 +69,7 @@ function shuffle<T>(items: readonly T[]): T[] {
 
 function newPuzzle(): Puzzle {
   const slots = shuffle(KINDS)
-  return { slots, flips: slots.map(() => randomInt(2) === 1), shades: slots.map(() => randomInt(SHADES)) }
+  return { id: randomBytes(8).toString('hex'), slots, flips: slots.map(() => randomInt(2) === 1), shades: slots.map(() => randomInt(SHADES)) }
 }
 
 /** What the client sees: cells and colours in the order of the slots, without the names. */
@@ -109,25 +114,29 @@ export async function receiveJoinRequest(ctx: Ctx, q: Q, req: ChatJoinRequest, p
   await ensureChat(q, req.chat, now)
   const settings = await getSettings(q, req.chat.id)
   const queryId = req.query_id ?? null
+  // A new request of the same person, the door on or off: an answer of an old check not sent yet (waiting, or held by a
+  // sender that has not called yet) must not go out, because by the pair chat/person it would reach this request.
+  await pairLock(q, req.chat.id, req.from.id)
+  await q.query(`UPDATE gate_checks SET send = 'skipped', send_note = 'superseded' WHERE chat_id = $1 AND user_id = $2 AND purpose = 'join' AND send IN ('todo', 'sending')`, [
+    req.chat.id,
+    req.from.id,
+  ])
   if (!settings.bool('join_gate') || req.from.is_bot) {
     if (queryId) posts.push(() => answerQuietly(ctx, queryId, 'queue'))
     return
   }
-  await pairLock(q, req.chat.id, req.from.id)
   // Only checks the person was given count: the windows that opened or are opening, not the refusals of the limit.
   const recent = await q.query<{ n: number }>(
     `SELECT count(*)::int AS n FROM gate_checks
      WHERE chat_id = $1 AND user_id = $2 AND purpose = 'join' AND door IN ('todo', 'opening', 'open') AND created_at > $3`,
     [req.chat.id, req.from.id, new Date(now.getTime() - DAY_MS)],
   )
-  // A new request of the same person: the old check cannot be answered any more, and an answer of an old check not sent
-  // yet must not go out, because by the pair chat/person it would reach the new request.
+  // The pending check of the old request cannot be answered any more.
   await q.query(`UPDATE gate_checks SET status = 'gone', reason = 'replaced', decided_at = $3 WHERE chat_id = $1 AND user_id = $2 AND purpose = 'join' AND status = 'pending'`, [
     req.chat.id,
     req.from.id,
     now,
   ])
-  await q.query(`UPDATE gate_checks SET send = 'skipped', send_note = 'superseded' WHERE chat_id = $1 AND user_id = $2 AND purpose = 'join' AND send = 'todo'`, [req.chat.id, req.from.id])
   const limited = recent[0].n >= DAILY_CHECKS
   const rows = await q.query(
     `INSERT INTO gate_checks (chat_id, user_id, purpose, via, query_id, user_chat_id, token, puzzle, status, send, reason, door, created_at, decided_at)
@@ -161,8 +170,10 @@ async function openDoor(ctx: Ctx, check: Row, title: string): Promise<void> {
   const mine = await ctx.db.query(`UPDATE gate_checks SET door = 'opening' WHERE check_id = $1 AND door = 'todo' AND status = 'pending' RETURNING 1`, [check.check_id])
   if (mine.length === 0) return
   const age = () => ctx.clock.now().getTime() - new Date(check.created_at).getTime()
+  // Opened late (after a stop) with less than a minute left, the window would be declined right away: the admins decide.
+  const late = age() > (await windowMs(ctx, check)) - DOOR_MIN_LEFT_MS
   const opened = (via: string) => ctx.db.query(`UPDATE gate_checks SET door = 'open', via = $2 WHERE check_id = $1 AND door = 'opening'`, [check.check_id, via])
-  if (check.query_id && age() < GUARD_MS) {
+  if (!late && check.query_id && age() < GUARD_MS) {
     try {
       await ctx.tg.sendChatJoinRequestWebApp(check.query_id, doorUrl(ctx))
       await opened('guard')
@@ -171,7 +182,7 @@ async function openDoor(ctx: Ctx, check: Row, title: string): Promise<void> {
       ctx.log.warn('gate_window_failed', { check_id: check.check_id, error: String(error) })
     }
   }
-  if (check.user_chat_id && age() < DM_MS) {
+  if (!late && check.user_chat_id && age() < DM_MS) {
     try {
       await ctx.tg.sendMessage(Number(check.user_chat_id), DM_TEXT(title), { buttons: [[{ text: 'Открыть дверь 🐸', web_app: { url: doorUrl(ctx, check.token) } }]] })
       await opened('dm')
@@ -224,7 +235,7 @@ export async function findDoor(ctx: Ctx, from: { userId: number; queryId: string
 
 const STATES: Record<string, DoorState> = { pending: 'open', passed: 'passed', failed: 'failed', timeout: 'timeout', gone: 'gone', used: 'passed' }
 /** A found frog is «Пустил» only when Telegram took the approval. */
-const PASSED_BY_SEND: Record<string, DoorState> = { todo: 'letting', sending: 'letting', done: 'passed', failed: 'stuck', skipped: 'gone' }
+const PASSED_BY_SEND: Record<string, DoorState> = { todo: 'letting', sending: 'letting', done: 'passed', failed: 'stuck', skipped: 'gone', missing: 'gone' }
 
 function stateOf(check: Row): DoorState {
   if (check.status === 'passed') return PASSED_BY_SEND[check.send as string] ?? 'letting'
@@ -236,7 +247,7 @@ export async function doorView(ctx: Ctx, check: Row | null, missed = false): Pro
   const title = (await ctx.db.query('SELECT title FROM chats WHERE chat_id = $1', [check.chat_id]))[0]?.title ?? 'чат'
   const state = stateOf(check)
   if (state !== 'open') return { state, title }
-  return { state, title, puzzle: puzzleView(check.puzzle as Puzzle), round: Number(check.misses), ...(missed ? { missed } : {}) }
+  return { state, title, puzzle: puzzleView(check.puzzle as Puzzle), layout: (check.puzzle as Puzzle).id, ...(missed ? { missed } : {}) }
 }
 
 export type PickResult =
@@ -278,13 +289,13 @@ async function expireOne(ctx: Ctx, check: Row, now: Date): Promise<void> {
  * One tap on the slot `index`. The frog decides the check; a miss reshuffles once, the second miss fails it. Every change
  * is conditional on the state that was read, so two taps at once count once.
  */
-export async function pick(ctx: Ctx, check: Row, index: number, round: number): Promise<PickResult> {
+export async function pick(ctx: Ctx, check: Row, index: number, layout: string): Promise<PickResult> {
   const now = ctx.clock.now()
   const puzzle = check.puzzle as Puzzle
   const toSend = check.purpose === 'join' ? 'todo' : 'none'
   const passed = check.purpose === 'join' ? 'passed' : 'used'
   if (check.status !== 'pending') return { result: 'closed', check }
-  if (round !== Number(check.misses)) return { result: 'stale', check }
+  if (layout !== puzzle.id) return { result: 'stale', check }
   // The time limit holds at the tap too, not only at the next pass of the tick; the UPDATEs below keep it at the boundary.
   const since = new Date(now.getTime() - (await windowMs(ctx, check)))
   if (new Date(check.created_at).getTime() <= since.getTime()) {
@@ -375,12 +386,14 @@ async function callTelegram(ctx: Ctx, check: Row, approve: boolean): Promise<'se
   }
   return ctx.db.tx(async (q) => {
     await pairLock(q, check.chat_id, check.user_id)
+    // Under the lock of the pair: the send is still ours (a new request takes it away) and no newer check is there.
+    const mine = await q.query(`SELECT 1 FROM gate_checks WHERE check_id = $1 AND send = 'sending' AND send_tries = $2`, [check.check_id, check.send_tries])
     const newer = await q.query(`SELECT 1 FROM gate_checks WHERE chat_id = $1 AND user_id = $2 AND purpose = 'join' AND check_id > $3 LIMIT 1`, [
       check.chat_id,
       check.user_id,
       check.check_id,
     ])
-    if (newer.length > 0) return 'superseded'
+    if (mine.length === 0 || newer.length > 0) return 'superseded'
     if (approve) await ctx.tg.approveChatJoinRequest(Number(check.chat_id), Number(check.user_id))
     else await ctx.tg.declineChatJoinRequest(Number(check.chat_id), Number(check.user_id))
     return 'sent'
@@ -394,14 +407,16 @@ async function finishSend(ctx: Ctx, check: Row, fields: { send: string; note?: s
   )
 }
 
-async function sendOne(ctx: Ctx, check: Row): Promise<void> {
+/** One send by the holder of its lease; exported for the race tests of a sender that claimed before a new request came. */
+export async function sendOne(ctx: Ctx, check: Row): Promise<void> {
   try {
     const sent = await callTelegram(ctx, check, check.status === 'passed')
     await finishSend(ctx, check, sent === 'sent' ? { send: 'done' } : { send: 'skipped', note: 'superseded' })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (error instanceof TelegramError && error.kind === 'client') {
-      await finishSend(ctx, check, { send: SETTLED.test(message) ? 'done' : 'failed', note: message.slice(0, 200) })
+      const settled = PARTICIPANT.test(message) ? 'done' : MISSING.test(message) ? 'missing' : 'failed'
+      await finishSend(ctx, check, { send: settled, note: message.slice(0, 200) })
       return
     }
     const tries = Number(check.send_tries)
@@ -429,13 +444,13 @@ export async function sendDecisions(ctx: Ctx): Promise<number> {
 
 // ---------------------------------------------------------------- the appeal button
 
-export type AppealCheck = { state: 'open'; puzzle: Sprite[]; round: number } | { state: 'wait' }
+export type AppealCheck = { state: 'open'; puzzle: Sprite[]; layout: string } | { state: 'wait' }
 
 /** Section 3.6.8: the check before «Разбанить меня». A pending one is reused; after a failure a new one only after 10 minutes. */
 export async function appealCheck(ctx: Ctx, chatId: number, userId: number): Promise<AppealCheck> {
   const now = ctx.clock.now()
   const pending = await ctx.db.query(`SELECT * FROM gate_checks WHERE chat_id = $1 AND user_id = $2 AND purpose = 'appeal' AND status = 'pending'`, [chatId, userId])
-  if (pending[0]) return { state: 'open', puzzle: puzzleView(pending[0].puzzle as Puzzle), round: Number(pending[0].misses) }
+  if (pending[0]) return { state: 'open', puzzle: puzzleView(pending[0].puzzle as Puzzle), layout: (pending[0].puzzle as Puzzle).id }
   const failed = await ctx.db.query(`SELECT 1 FROM gate_checks WHERE chat_id = $1 AND user_id = $2 AND purpose = 'appeal' AND status = 'failed' AND decided_at > $3`, [
     chatId,
     userId,
@@ -447,22 +462,22 @@ export async function appealCheck(ctx: Ctx, chatId: number, userId: number): Pro
      ON CONFLICT (chat_id, user_id, purpose) WHERE status = 'pending' DO NOTHING RETURNING *`,
     [chatId, userId, newToken(), JSON.stringify(newPuzzle()), now],
   )
-  if (rows[0]) return { state: 'open', puzzle: puzzleView(rows[0].puzzle as Puzzle), round: Number(rows[0].misses) }
+  if (rows[0]) return { state: 'open', puzzle: puzzleView(rows[0].puzzle as Puzzle), layout: (rows[0].puzzle as Puzzle).id }
   return appealCheck(ctx, chatId, userId)
 }
 
 export type AppealPick =
   | { result: 'passed' }
-  | { result: 'miss' | 'stale'; puzzle: Sprite[]; round: number }
+  | { result: 'miss' | 'stale'; puzzle: Sprite[]; layout: string }
   | { result: 'failed' }
   | { result: 'none' }
 
 /** A tap in the appeal check. 'passed' spends the check: the caller presses the button right after. */
-export async function appealPick(ctx: Ctx, chatId: number, userId: number, index: number, round: number): Promise<AppealPick> {
+export async function appealPick(ctx: Ctx, chatId: number, userId: number, index: number, layout: string): Promise<AppealPick> {
   const check = (await ctx.db.query(`SELECT * FROM gate_checks WHERE chat_id = $1 AND user_id = $2 AND purpose = 'appeal' AND status = 'pending'`, [chatId, userId]))[0]
   if (!check) return { result: 'none' }
-  const result = await pick(ctx, check, index, round)
-  if (result.result === 'miss' || result.result === 'stale') return { result: result.result, puzzle: puzzleView(result.check.puzzle as Puzzle), round: Number(result.check.misses) }
+  const result = await pick(ctx, check, index, layout)
+  if (result.result === 'miss' || result.result === 'stale') return { result: result.result, puzzle: puzzleView(result.check.puzzle as Puzzle), layout: (result.check.puzzle as Puzzle).id }
   if (result.result === 'closed') return result.check?.status === 'used' ? { result: 'passed' } : { result: 'none' }
   return result
 }
