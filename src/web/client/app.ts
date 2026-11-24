@@ -518,8 +518,8 @@ async function appealScreen(): Promise<Child[]> {
     send.removeAttribute('disabled')
     juice.appealRefused(result)
   }
-  const showCheck = (puzzle: Dict[], round: unknown, note: string): void => {
-    const next = beasts(puzzle, (index) => press({ pick: index, round: Number(round) || 0 }))
+  const showCheck = (puzzle: Dict[], layout: unknown, note: string): void => {
+    const next = beasts(puzzle, (index) => press({ pick: index, layout: s(layout) }))
     if (grid) grid.replaceWith(next)
     else card.insertBefore(next, result)
     grid = next
@@ -527,8 +527,8 @@ async function appealScreen(): Promise<Child[]> {
   }
   const answered = (r: Dict): void => {
     const status = s(r.status)
-    if (status === 'check_miss') return showCheck(list(r.puzzle), r.round, 'Мимо. Звери перемешались, последняя попытка.')
-    if (status === 'check_stale') return showCheck(list(r.puzzle), r.round, 'Звери уже перемешались. Тыкните в лягушонка на этой картинке.')
+    if (status === 'check_miss') return showCheck(list(r.puzzle), r.layout, 'Мимо. Звери перемешались, последняя попытка.')
+    if (status === 'check_stale') return showCheck(list(r.puzzle), r.layout, 'Звери уже перемешались. Тыкните в лягушонка на этой картинке.')
     if (status === 'check_failed') return refuse('Проверка не пройдена. Попробуйте через 10 минут.')
     if (status === 'check_required') return startCheck()
     grid?.remove()
@@ -546,7 +546,7 @@ async function appealScreen(): Promise<Child[]> {
     void api('/api/appeal/check')
       .then((check) => {
         const at = s(check.state)
-        if (at === 'open') return showCheck(list(check.puzzle), check.round, 'Сначала тыкните в лягушонка: так Жевчик отличает людей от спам-ботов.')
+        if (at === 'open') return showCheck(list(check.puzzle), check.layout, 'Сначала тыкните в лягушонка: так Жевчик отличает людей от спам-ботов.')
         if (at === 'wait') return refuse('Проверка не пройдена. Попробуйте через 10 минут.')
         press()
       })
@@ -623,7 +623,7 @@ function doorScreen(view: Dict): Child[] {
   }
   if (view.missed === true) status.textContent = 'Мимо. Это не лягушонок. Звери перемешались, последняя попытка.'
   const grid = beasts(list(view.puzzle), (index) => {
-    void doorApi({ method: 'POST', body: JSON.stringify({ pick: index, round: Number(view.round) || 0 }) })
+    void doorApi({ method: 'POST', body: JSON.stringify({ pick: index, layout: s(view.layout) }) })
       .then((next) => render(async () => doorScreen(next)))
       .catch(() => {
         status.textContent = 'Связь подвела, тыкни ещё раз.'
@@ -645,7 +645,7 @@ function waitForDoor(attempt: number): void {
         if (s(view.state) === 'letting' && attempt < DOOR_POLLS) return waitForDoor(attempt + 1)
         return render(async () => doorScreen(s(view.state) === 'letting' ? { ...view, state: 'slow' } : view))
       })
-      .catch(() => (attempt < DOOR_POLLS ? waitForDoor(attempt + 1) : undefined))
+      .catch(() => (attempt < DOOR_POLLS ? waitForDoor(attempt + 1) : render(async () => doorScreen({ state: 'slow' }))))
   }, DOOR_POLL_MS)
 }
 

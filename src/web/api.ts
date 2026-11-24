@@ -178,12 +178,12 @@ async function viewerHasBan(ctx: Ctx, auth: { chatId: number; userId: number }):
 }
 
 /** Section 3.6.8: a slot of the six animals. */
-/** A tap: the slot 0..5 and the number of the layout it was made on (0 or 1). */
-function readPick(body: unknown): { index: number; round: number } | null {
-  const { pick, round } = (body ?? {}) as { pick?: unknown; round?: unknown }
+/** A tap: the slot 0..5 and the name of the layout it was made on. */
+function readPick(body: unknown): { index: number; layout: string } | null {
+  const { pick, layout } = (body ?? {}) as { pick?: unknown; layout?: unknown }
   const slot = typeof pick === 'number' && Number.isInteger(pick) && pick >= 0 && pick < 6
-  const layout = typeof round === 'number' && Number.isInteger(round) && round >= 0 && round <= 1
-  return slot && layout ? { index: pick, round } : null
+  const named = typeof layout === 'string' && /^[0-9a-f]{16}$/.test(layout)
+  return slot && named ? { index: pick, layout } : null
 }
 
 /** The press would lift an automatic sanction now: then the frog is asked first. */
@@ -203,7 +203,7 @@ function mountDoor(app: Api, ctx: Ctx): void {
     if (tap === null) return c.json({ error: 'invalid' }, 422)
     const check = await find(c)
     if (!check) return c.json(await doorView(ctx, null))
-    const result = await pick(ctx, check, tap.index, tap.round)
+    const result = await pick(ctx, check, tap.index, tap.layout)
     if (result.result === 'miss') return c.json(await doorView(ctx, result.check, true))
     if (result.result === 'stale') return c.json(await doorView(ctx, result.check, Number(result.check.misses) > 0))
     const now = (await ctx.db.query('SELECT * FROM gate_checks WHERE check_id = $1', [check.check_id]))[0]
@@ -277,9 +277,9 @@ function mountPublic(app: Api, ctx: Ctx): void {
     if (needsCheck(await appealState(ctx, auth.chatId, auth.userId))) {
       const tap = readPick(await c.req.json().catch(() => null))
       if (tap === null) return c.json({ status: 'check_required' })
-      const result = await appealPick(ctx, auth.chatId, auth.userId, tap.index, tap.round)
-      if (result.result === 'miss') return c.json({ status: 'check_miss', puzzle: result.puzzle, round: result.round })
-      if (result.result === 'stale') return c.json({ status: 'check_stale', puzzle: result.puzzle, round: result.round })
+      const result = await appealPick(ctx, auth.chatId, auth.userId, tap.index, tap.layout)
+      if (result.result === 'miss') return c.json({ status: 'check_miss', puzzle: result.puzzle, layout: result.layout })
+      if (result.result === 'stale') return c.json({ status: 'check_stale', puzzle: result.puzzle, layout: result.layout })
       if (result.result === 'failed') return c.json({ status: 'check_failed' })
       if (result.result === 'none') return c.json({ status: 'check_required' })
     }
