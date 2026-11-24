@@ -29,7 +29,13 @@
 (* Проверка «есть ли новее» и вызов по паре идут под одной блокировкой     *)
 (* pg_advisory_xact_lock(чат, человек), её же берёт Replace, поэтому в     *)
 (* модели они один шаг. Новая заявка возможна, только когда старая не      *)
-(* открыта (Telegram не даёт второй открытой заявки).                      *)
+(* открыта (Telegram не даёт второй открытой заявки). Replace снимает и    *)
+(* ответ, который отправитель уже взял (sending): под блокировкой он       *)
+(* сверяет, что аренда ещё его. Остаток вне модели: Replace совмещает      *)
+(* появление заявки в Telegram и обработку её обновления. Между ними       *)
+(* (задержка опроса) вызов по паре дойдёт до новой заявки: Bot API         *)
+(* адресует approve/declineChatJoinRequest только парой. Принято 24.11:    *)
+(* отказ не бан, человек подаёт заявку снова.                              *)
 (* Вне модели: лимит трёх проверок в сутки, личка (та же отправка без      *)
 (* query_id), разбан кнопкой (своя модель Appeal).                         *)
 (***************************************************************************)
@@ -123,13 +129,13 @@ Call(d) == /\ pc[d] = "call"
            /\ UNCHANGED <<req, status, send, owner, leaseOver, alive, joined, decisions>>
 
 CallFail(d) == /\ pc[d] = "call"
-               /\ send' = IF owner = d THEN "todo" ELSE send
+               /\ send' = IF owner = d /\ send = "sending" THEN "todo" ELSE send
                /\ owner' = IF owner = d THEN "none" ELSE owner
                /\ pc' = [pc EXCEPT ![d] = "idle"]
                /\ UNCHANGED <<req, tgNew, stray, status, leaseOver, tg, alive, joined, decisions, calls, sent>>
 
 Finish(d) == /\ pc[d] = "finish"
-             /\ send' = IF owner = d THEN "done" ELSE send
+             /\ send' = IF owner = d /\ send = "sending" THEN "done" ELSE send
              /\ owner' = IF owner = d THEN "none" ELSE owner
              /\ pc' = [pc EXCEPT ![d] = "idle"]
              /\ UNCHANGED <<req, tgNew, stray, status, leaseOver, tg, alive, joined, decisions, calls, sent>>
@@ -142,7 +148,7 @@ Replace == /\ req = "old" /\ tg # "open"
            /\ req' = "new" /\ tgNew' = "open"
            /\ status' = IF status = "pending" THEN "gone" ELSE status
            /\ decisions' = IF status = "pending" THEN decisions + 1 ELSE decisions
-           /\ send' = IF Fresh /\ send = "todo" THEN "skipped" ELSE send
+           /\ send' = IF Fresh /\ send \in {"todo", "sending"} THEN "skipped" ELSE send
            /\ UNCHANGED <<stray, owner, leaseOver, pc, tg, alive, joined, calls, sent>>
 
 Next == \/ Withdraw \/ Replace \/ Pick \/ Timeout \/ AdminOk \/ AdminNo \/ JoinSeen \/ Expire \/ LeaseOver
