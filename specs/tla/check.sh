@@ -32,5 +32,6 @@ check Settings-allchats ChatIsolation Settings
 check Gate none Gate
 check Gate-nocas SentMatches Gate
 check Gate-nofallback NoHanging Gate
+check Gate-nofresh NoStray Gate
 echo "check: $ok ok, $failed failed"
 [ "$failed" -eq 0 ]
