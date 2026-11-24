@@ -518,8 +518,8 @@ async function appealScreen(): Promise<Child[]> {
     send.removeAttribute('disabled')
     juice.appealRefused(result)
   }
-  const showCheck = (puzzle: Dict[], note: string): void => {
-    const next = beasts(puzzle, (index) => press({ pick: index }))
+  const showCheck = (puzzle: Dict[], round: unknown, note: string): void => {
+    const next = beasts(puzzle, (index) => press({ pick: index, round: Number(round) || 0 }))
     if (grid) grid.replaceWith(next)
     else card.insertBefore(next, result)
     grid = next
@@ -527,7 +527,8 @@ async function appealScreen(): Promise<Child[]> {
   }
   const answered = (r: Dict): void => {
     const status = s(r.status)
-    if (status === 'check_miss') return showCheck(list(r.puzzle), 'Мимо. Звери перемешались, последняя попытка.')
+    if (status === 'check_miss') return showCheck(list(r.puzzle), r.round, 'Мимо. Звери перемешались, последняя попытка.')
+    if (status === 'check_stale') return showCheck(list(r.puzzle), r.round, 'Звери уже перемешались. Тыкните в лягушонка на этой картинке.')
     if (status === 'check_failed') return refuse('Проверка не пройдена. Попробуйте через 10 минут.')
     if (status === 'check_required') return startCheck()
     grid?.remove()
@@ -545,7 +546,7 @@ async function appealScreen(): Promise<Child[]> {
     void api('/api/appeal/check')
       .then((check) => {
         const at = s(check.state)
-        if (at === 'open') return showCheck(list(check.puzzle), 'Сначала тыкните в лягушонка: так Жевчик отличает людей от спам-ботов.')
+        if (at === 'open') return showCheck(list(check.puzzle), check.round, 'Сначала тыкните в лягушонка: так Жевчик отличает людей от спам-ботов.')
         if (at === 'wait') return refuse('Проверка не пройдена. Попробуйте через 10 минут.')
         press()
       })
@@ -590,7 +591,10 @@ function beasts(puzzle: Dict[], onPick: (index: number) => void): HTMLElement {
 }
 
 const DOOR_TEXT: Record<string, string> = {
+  letting: 'Лягушонок найден. Открываю дверь…',
   passed: 'Пустил. Заходи и веди себя прилично 🐸',
+  stuck: 'Лягушонка ты нашёл, но Telegram не принял мой ответ. Заявка осталась у админов, они пустят.',
+  slow: 'Лягушонка ты нашёл, а Telegram пока молчит. Я повторю сам: как только он примет ответ, ты в чате.',
   failed: 'Не пустил: лягушонка с другим зверем перепутать - это надо уметь. Заявку можно подать ещё раз.',
   timeout: 'Время вышло, заявку я закрыл. Подай её заново, если ты человек.',
   gone: 'Эта заявка уже решена.',
@@ -614,11 +618,12 @@ function doorScreen(view: Dict): Child[] {
   if (state !== 'open') {
     status.textContent = DOOR_TEXT[state] ?? DOOR_TEXT.unknown
     if (state === 'passed') setTimeout(() => webApp?.close?.(), 2500)
+    if (state === 'letting') waitForDoor(1)
     return [h('section', { class: 'door', 'data-field': 'door', 'data-state': state }, mascot, head, status)]
   }
   if (view.missed === true) status.textContent = 'Мимо. Это не лягушонок. Звери перемешались, последняя попытка.'
   const grid = beasts(list(view.puzzle), (index) => {
-    void doorApi({ method: 'POST', body: JSON.stringify({ pick: index }) })
+    void doorApi({ method: 'POST', body: JSON.stringify({ pick: index, round: Number(view.round) || 0 }) })
       .then((next) => render(async () => doorScreen(next)))
       .catch(() => {
         status.textContent = 'Связь подвела, тыкни ещё раз.'
@@ -627,6 +632,21 @@ function doorScreen(view: Dict): Child[] {
   })
   const ask = h('p', {}, `Это вход в «${s(view.title)}». Тыкни в лягушонка - и заходи. Спамеры почему-то всегда тыкают в утку.`)
   return [h('section', { class: 'door', 'data-field': 'door', 'data-state': 'open' }, mascot, head, ask, grid, status)]
+}
+
+/** The answer to Telegram is on its way: ask again every 2 seconds, a minute at most, then show what there is. */
+const DOOR_POLL_MS = 2000
+const DOOR_POLLS = 30
+
+function waitForDoor(attempt: number): void {
+  setTimeout(() => {
+    void doorApi()
+      .then((view) => {
+        if (s(view.state) === 'letting' && attempt < DOOR_POLLS) return waitForDoor(attempt + 1)
+        return render(async () => doorScreen(s(view.state) === 'letting' ? { ...view, state: 'slow' } : view))
+      })
+      .catch(() => (attempt < DOOR_POLLS ? waitForDoor(attempt + 1) : undefined))
+  }, DOOR_POLL_MS)
 }
 
 function bootDoor(): void {
