@@ -26,7 +26,7 @@ export async function runBot(config: Config, signal: AbortSignal, heartbeatFile 
     clock: systemClock,
     rng: systemRng,
     log: consoleLogger,
-    env: { botUsername: me.username, botId: me.id, importDir: config.importDir, jevModel: JEV_MODEL },
+    env: { botUsername: me.username, botId: me.id, importDir: config.importDir, jevModel: JEV_MODEL, publicUrl: config.publicUrl },
   }
   const app = createApp(ctx)
   await app.start()

@@ -143,6 +143,22 @@ export class FakeTelegram implements TelegramApi {
     this.enter('setChatMemberTag', [chatId, userId, tag])
     this.tags.set(userId, tag)
   }
+  async sendChatJoinRequestWebApp(queryId: string, url: string) {
+    this.enter('sendChatJoinRequestWebApp', [queryId, url])
+  }
+
+  async answerChatJoinRequestQuery(queryId: string, result: string) {
+    this.enter('answerChatJoinRequestQuery', [queryId, result])
+  }
+
+  async approveChatJoinRequest(chatId: number, userId: number) {
+    this.enter('approveChatJoinRequest', [chatId, userId])
+  }
+
+  async declineChatJoinRequest(chatId: number, userId: number) {
+    this.enter('declineChatJoinRequest', [chatId, userId])
+  }
+
   async getChatMember(chatId: number, userId: number): Promise<ChatMemberInfo> {
     this.enter('getChatMember', [chatId, userId])
     const tag = this.tags.get(userId)

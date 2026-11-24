@@ -5,11 +5,12 @@ import {
   type ChatInfo,
   type ChatMemberInfo,
   type ChatPermissions,
+  type JoinQueryResult,
   type SendOptions,
   type TelegramApi,
 } from '../ports.js'
 
-export const ALLOWED_UPDATES = ['message', 'edited_message', 'message_reaction', 'message_reaction_count', 'chat_member', 'my_chat_member', 'callback_query'] as const
+export const ALLOWED_UPDATES = ['message', 'edited_message', 'message_reaction', 'message_reaction_count', 'chat_member', 'my_chat_member', 'callback_query', 'chat_join_request'] as const
 
 const SAFE_NETWORK_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'])
 
@@ -144,5 +145,21 @@ export class GrammyTelegram implements TelegramApi {
 
   answerCallbackQuery(callbackId: string, text?: string): Promise<void> {
     return call(async () => void (await this.api.answerCallbackQuery(callbackId, { text })))
+  }
+
+  sendChatJoinRequestWebApp(queryId: string, url: string): Promise<void> {
+    return call(async () => void (await this.api.sendChatJoinRequestWebApp(queryId, url)))
+  }
+
+  answerChatJoinRequestQuery(queryId: string, result: JoinQueryResult): Promise<void> {
+    return call(async () => void (await this.api.answerChatJoinRequestQuery(queryId, result)))
+  }
+
+  approveChatJoinRequest(chatId: number, userId: number): Promise<void> {
+    return call(async () => void (await this.api.approveChatJoinRequest(chatId, userId)))
+  }
+
+  declineChatJoinRequest(chatId: number, userId: number): Promise<void> {
+    return call(async () => void (await this.api.declineChatJoinRequest(chatId, userId)))
   }
 }

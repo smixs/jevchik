@@ -22,7 +22,7 @@ export async function runWeb(config: Config): Promise<{ close(): Promise<void> }
     clock: systemClock,
     rng: systemRng,
     log: consoleLogger,
-    env: { botUsername: username, botId: 0, importDir: config.importDir, jevModel: JEV_MODEL },
+    env: { botUsername: username, botId: 0, importDir: config.importDir, jevModel: JEV_MODEL, publicUrl: config.publicUrl },
   }
   createApp(ctx)
   const app = createWebApp(ctx, {

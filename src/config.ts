@@ -11,6 +11,8 @@ export interface Config {
   telegramApiRoot: string | null
   jevUrl: string | null
   publicDir: string | null
+  /** Section 3.6.8: the HTTPS address of the Mini App. */
+  publicUrl: string
 }
 
 function need(env: NodeJS.ProcessEnv, name: string): string {
@@ -37,5 +39,6 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     telegramApiRoot: optional(env, 'TELEGRAM_API_ROOT'),
     jevUrl: optional(env, 'JEV_API_URL'),
     publicDir: optional(env, 'PUBLIC_DIR'),
+    publicUrl: env.PUBLIC_URL || 'https://jevchik.com',
   }
 }

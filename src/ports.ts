@@ -47,7 +47,12 @@ export interface InlineButton {
   text: string
   url?: string
   callback_data?: string
+  /** Section 3.6.8: a Mini App button; Telegram allows it in a private chat with the bot only. */
+  web_app?: { url: string }
 }
+
+/** Section 3.6.8: what a guard bot answers to a join request query. */
+export type JoinQueryResult = 'approve' | 'decline' | 'queue'
 
 /** Section 3.6.3: the quote of a card is a Telegram blockquote; offset and length are in UTF-16 code units. */
 export interface TextEntity {
@@ -100,6 +105,11 @@ export interface TelegramApi {
   downloadFile(filePath: string): Promise<Uint8Array>
   answerCallbackQuery(callbackId: string, text?: string): Promise<void>
   editMessageText(chatId: number, messageId: number, text: string, options?: SendOptions): Promise<void>
+  /** Section 3.6.8: the join request door. */
+  sendChatJoinRequestWebApp(queryId: string, url: string): Promise<void>
+  answerChatJoinRequestQuery(queryId: string, result: JoinQueryResult): Promise<void>
+  approveChatJoinRequest(chatId: number, userId: number): Promise<void>
+  declineChatJoinRequest(chatId: number, userId: number): Promise<void>
 }
 
 export interface JevAnswer {

@@ -85,7 +85,7 @@ describe('T-poll and T-dup-update', () => {
 
 describe('the Telegram adapter on the wire', () => {
   it('asks for exactly the allowed updates of section 3.2', () => {
-    expect([...ALLOWED_UPDATES]).toEqual(['message', 'edited_message', 'message_reaction', 'message_reaction_count', 'chat_member', 'my_chat_member', 'callback_query'])
+    expect([...ALLOWED_UPDATES]).toEqual(['message', 'edited_message', 'message_reaction', 'message_reaction_count', 'chat_member', 'my_chat_member', 'callback_query', 'chat_join_request'])
   })
 
   it('sends getUpdates with long polling and allowed_updates, restrict with independent permissions, reactions as emoji', async () => {

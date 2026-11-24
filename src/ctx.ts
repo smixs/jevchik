@@ -6,6 +6,8 @@ interface AppEnv {
   botId: number
   importDir: string
   jevModel: string
+  /** Section 3.6.8: the HTTPS address of the Mini App, the door window opens there. */
+  publicUrl?: string
 }
 
 export interface Ctx {
