@@ -11,7 +11,8 @@ import { get, makeWeb, seedWorld } from './support/web.js'
 // F31, section 3.6.4: a channel that writes in the group is a member. It gets karma by the common rules, no tag and no karma
 // punishment; a new channel with spam is deleted and banned (banChatSenderChat); /spam, /report and import work for it.
 
-const SPAM = 'Заработай 500 долларов в день без вложений, пиши в личку!'
+// Exercise model-scored spam here; phrase overrides have their own pipeline tests.
+const SPAM = 'Заработай 500 долларов в день, подробности на сайте!'
 const MILD = 'Посмотрите мой курс по промптам со скидкой'
 const TARGET = 'купи крипту, пиши в личку'
 const CHANNEL = { id: -1005550001111, type: 'channel', title: 'Канал Васи', username: 'vasya_channel' }

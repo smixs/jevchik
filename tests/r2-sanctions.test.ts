@@ -30,7 +30,7 @@ async function runningOp(key: string, kind: string, payload: unknown, claimedAgo
   )
 }
 
-describe('an operation left running by a crashed process is picked up when its lease expires', () => {
+describe('R2-1: an operation left running by a crashed process is picked up when its lease expires', () => {
   it('fast restart: the steam room continues from the unfinished step', async () => {
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
     await runningOp(`steam:${CHAT}:${CAROL.id}:700:restrict`, 'restrict', { userId: CAROL.id, permissions: NO_PERMISSIONS }, 0)
@@ -72,7 +72,7 @@ describe('an operation left running by a crashed process is picked up when its l
   })
 })
 
-describe('"cannot tell whether the target is an administrator" is not "not an administrator"', () => {
+describe('R2-2: "cannot tell whether the target is an administrator" is not "not an administrator"', () => {
   it('steam: no delete and no restrict while the role is unknown; it continues once known', async () => {
     h.tg.fail('getChatMember', tgError.server(), 3)
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
@@ -147,7 +147,7 @@ describe('"cannot tell whether the target is an administrator" is not "not an ad
   })
 })
 
-describe('an accepted appeal cancels the transition to the ban', () => {
+describe('R2-4: an accepted appeal cancels the transition to the ban', () => {
   async function steamed(): Promise<void> {
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
     await h.app.settle()
@@ -189,7 +189,7 @@ describe('an accepted appeal cancels the transition to the ban', () => {
   })
 })
 
-describe('a missing getChat.permissions is not an outage', () => {
+describe('R2-12: a missing getChat.permissions is not an outage', () => {
   it('lifting a steam-room restriction uses an explicit default set and finishes', async () => {
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
     await h.app.settle()

@@ -221,7 +221,7 @@ interface FlaggedRow {
 }
 
 /**
- * Section 3.7: the admins pressed «Спам» on every flagged newcomer with no karma, so such a member
+ * Section 3.7 (decision of the owner 29.10): the admins pressed «Спам» on every flagged newcomer with no karma, so such a member
  * goes to the steam room at once; one with karma, or past the first messages, still waits for the admins.
  */
 async function steamsAtOnce(q: Q, f: ReactionFlag, row: FlaggedRow): Promise<boolean> {

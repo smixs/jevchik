@@ -26,7 +26,7 @@ async function scanFor(marker: string): Promise<string[]> {
   return hits
 }
 
-describe('no copy of removed text stays in operations', () => {
+describe('R2-7: no copy of removed text stays in operations', () => {
   it('spam text, report text and digest excerpts leave operations.payload once the operation is final', async () => {
     await pastObservation(h)
     await h.send(message({ id: 600, from: CAROL, text: 'привет' }))
@@ -79,7 +79,7 @@ describe('no copy of removed text stays in operations', () => {
   })
 })
 
-describe('settings that depend on each other are changed under one lock per chat', () => {
+describe('R2-11: settings that depend on each other are changed under one lock per chat', () => {
   it('two related thresholds set at once cannot leave the order broken', async () => {
     await h.send(botJoined())
     await h.db.query(`CREATE FUNCTION slow() RETURNS trigger AS $$ BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$ LANGUAGE plpgsql`)
@@ -94,7 +94,7 @@ describe('settings that depend on each other are changed under one lock per chat
   })
 })
 
-describe('the weekly digest', () => {
+describe('R2-13: the weekly digest', () => {
   async function seed(): Promise<void> {
     await h.send(botJoined())
     await seedMember(h, ALICE)
@@ -122,7 +122,7 @@ describe('the weekly digest', () => {
   })
 })
 
-describe('a re-added reaction is counted by the current rules', () => {
+describe('R2-14: a re-added reaction is counted by the current rules', () => {
   beforeEach(async () => {
     await pastObservation(h)
     await h.send(message({ id: 1000, from: ALICE, text: 'полезное' }))
@@ -170,7 +170,7 @@ describe('a re-added reaction is counted by the current rules', () => {
   })
 })
 
-describe('the question set keeps the normative keys and types', () => {
+describe('R2-15: the question set keeps the normative keys and types', () => {
   const change = (value: unknown) => changeSetting(h.db, { chatId: CHAT, key: 'questions', value, baseVersion: 0, actor: 1, now: h.clock.now() })
   const base = () => JSON.parse(JSON.stringify(loadDefaultQuestions())) as Record<string, Record<string, unknown>>
 
@@ -200,7 +200,7 @@ describe('the question set keeps the normative keys and types', () => {
   })
 })
 
-describe('what is logged from a rejected Jev answer', () => {
+describe('R2-16: what is logged from a rejected Jev answer', () => {
   it('the body is cut and does not carry the message text', async () => {
     await h.send(botJoined())
     const secret = 'СЕКРЕТНЫЙ-ТЕКСТ-СООБЩЕНИЯ'

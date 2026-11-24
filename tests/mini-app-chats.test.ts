@@ -4,7 +4,7 @@ import { TelegramError } from '../src/ports.js'
 import { VECTORS } from './support/vectors.js'
 import { makeWeb, seedWorld, type Web } from './support/web.js'
 
-// Section 3.8: the Mini App opened without start_param (the "Open App" button of the bot profile) lists
+// Section 3.8, lead decision 29.09: the Mini App opened without start_param (the "Open App" button of the bot profile) lists
 // the chats of the member and works with the chat the client names; the signed start_param keeps priority.
 
 let h: Harness
@@ -91,7 +91,7 @@ describe('a chat named by the client', () => {
     expect(await call('/api/leaderboard', VECTORS.no_ctx)).toEqual({ status: 400, body: { error: 'no_context' } })
   })
 
-  it('a named chat is taken only when initData has no start_param; an unknown or malformed one is refused', async () => {
+  it('review 2 low: a named chat is taken only when initData has no start_param; an unknown or malformed one is refused', async () => {
     expect(await call('/api/leaderboard', VECTORS.bob_unknown_ctx, CHAT)).toEqual({ status: 404, body: { error: 'unknown_chat' } })
     expect(await call('/api/leaderboard', VECTORS.bob_bad_ctx, CHAT)).toEqual({ status: 400, body: { error: 'bad_context' } })
     expect((await call('/api/leaderboard', VECTORS.no_ctx, CHAT)).status).toBe(200)

@@ -406,7 +406,7 @@ describe('karma_tag_template is checked by the schema', () => {
   })
 })
 
-describe('a tag set by a person is not overwritten: the member is read first', () => {
+describe('a tag set by a person is not overwritten (lead decision): the member is read first', () => {
   const reads = () => h.tg.of('getChatMember').map((c) => c.args)
 
   it('the tag in Telegram already equals the text: no call, the text and time are stored', async () => {

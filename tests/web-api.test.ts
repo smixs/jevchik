@@ -148,9 +148,9 @@ describe('F16: data of the leaderboard and the personal page', () => {
   })
 
   it('a public chat gets links by username', async () => {
-    await h.db.query(`UPDATE chats SET username = 'agents_chat' WHERE chat_id = $1`, [CHAT])
+    await h.db.query(`UPDATE chats SET username = 'aimasters_chat' WHERE chat_id = $1`, [CHAT])
     const page = await json(await get(web, '/api/me', VECTORS.alice_me))
-    expect(page.messages.latest[0].link).toBe('https://t.me/agents_chat/503')
+    expect(page.messages.latest[0].link).toBe('https://t.me/aimasters_chat/503')
   })
 
   it('a page of another participant is reachable by an opaque id', async () => {

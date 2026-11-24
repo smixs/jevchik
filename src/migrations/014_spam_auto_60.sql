@@ -1,4 +1,4 @@
--- Section 3.6: from 0.6 a judged message is removed and its author goes to the steam room.
+-- Section 3.6 (decision of the owner 29.10): from 0.6 a judged message is removed and its author goes to the steam room.
 -- A stored threshold above 0.6 gets a new version equal to 0.6, with an audit record by nobody (changed_by NULL); the review
 -- thresholds follow, since a review threshold may not exceed the automatic one.
 WITH latest AS (

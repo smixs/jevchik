@@ -30,7 +30,7 @@ export function historyText(n: number, first: Date | null, postedAt: Date): stri
 }
 
 /**
- * Section 3.6.0: a newcomer joined the chat after the bot and has at most `limit` messages in it, imported ones included; 0 makes everybody
+ * Section 3.6.0 (spec v10): a newcomer joined the chat after the bot and has at most `limit` messages in it, imported ones included; 0 makes everybody
  * one. For a new message the messages sent not later than it count (a delayed evaluation or messages that came right after
  * it change nothing); for an edit (`upTo` null) all the member's messages at the moment of the edit count.
  */

@@ -15,7 +15,7 @@ afterEach(async () => {
   await h.close()
 })
 
-describe('two administrators extending the observation', () => {
+describe('R2-19: two administrators extending the observation', () => {
   it('the loser gets 409, not 500', async () => {
     await h.db.query(`CREATE FUNCTION slow() RETURNS trigger AS $$ BEGIN PERFORM pg_sleep(0.3); RETURN NEW; END $$ LANGUAGE plpgsql`)
     await h.db.query(`CREATE TRIGGER slow BEFORE INSERT ON chat_settings FOR EACH ROW EXECUTE FUNCTION slow()`)
@@ -27,7 +27,7 @@ describe('two administrators extending the observation', () => {
   })
 })
 
-describe('a participant who hid the page sees their own name', () => {
+describe('R2-20: a participant who hid the page sees their own name', () => {
   it('on their own page; others still get 404 and the leaderboard row stays masked', async () => {
     await send(web, 'POST', '/api/me/hide', VECTORS.bob_lb, { hidden: true })
     const own = await (await get(web, '/api/me', VECTORS.bob_lb)).json()

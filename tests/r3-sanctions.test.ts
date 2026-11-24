@@ -35,7 +35,7 @@ async function spin(times: number, stepMs: number): Promise<void> {
 
 // ---------------------------------------------------------------- D4
 
-describe('a ban operation waiting for a retry is cancelled by an accepted appeal', () => {
+describe('R3-D4: a ban operation waiting for a retry is cancelled by an accepted appeal', () => {
   /** Steam room for Carol, the steam time runs out, the first banChatMember gets 502 and waits for a retry. */
   async function banWaitingForRetry(): Promise<string> {
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
@@ -140,7 +140,7 @@ describe('a ban operation waiting for a retry is cancelled by an accepted appeal
 
 // ---------------------------------------------------------------- D5
 
-describe('a karma punishment that cannot check the role ends with a card and is not recorded as applied', () => {
+describe('R3-D5: a karma punishment that cannot check the role ends with a card and is not recorded as applied', () => {
   async function move(delta: number, key: string): Promise<void> {
     const settings = await getSettings(h.db, CHAT)
     await h.db.tx((q) => award(q, { chatId: CHAT, userId: ALICE.id, delta, reason: 't', source: 't', key, now: h.clock.now(), settings }))
@@ -188,7 +188,7 @@ describe('a karma punishment that cannot check the role ends with a card and is 
 
 // ---------------------------------------------------------------- role: only a successful answer is "member"
 
-describe('any getChatMember error means "unknown", never "ordinary participant"', () => {
+describe('R3-role: any getChatMember error means "unknown", never "ordinary participant"', () => {
   it.each([
     ['chat not found', tgError.bad('Bad Request: chat not found')],
     ['user not found', tgError.bad('Bad Request: user not found')],

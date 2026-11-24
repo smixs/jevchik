@@ -37,7 +37,7 @@ function isServiceMessage(msg: Message): boolean {
 }
 
 /**
- * Spec 3.6.0: a message written by a person. Not a bot, not on behalf of a chat or a channel (sender_chat), not a post
+ * Spec 3.6.0 (v10): a message written by a person. Not a bot, not on behalf of a chat or a channel (sender_chat), not a post
  * auto-forwarded from the linked channel, not Telegram's service account, not a service message.
  */
 function fromPerson(msg: Message): boolean {
@@ -75,7 +75,7 @@ export function isChannelId(userId: number): boolean {
 }
 
 /**
- * The message this one answers. Spec 3.6.0: a reply to a service message - in a forum every topic message answers the
+ * The message this one answers. Spec 3.6.0 (v10): a reply to a service message - in a forum every topic message answers the
  * message that created the topic - is no reply.
  */
 export function replyOf(msg: Message): Message | null {

@@ -19,7 +19,7 @@ const failOn = async (table: string): Promise<void> => {
 const healOn = (table: string) => h.db.query(`DROP TRIGGER boom ON ${table}`)
 const answers = () => h.tg.callbackAnswers.map((a) => a.text)
 
-describe('a card button is resolved only together with its action', () => {
+describe('R2-3: a card button is resolved only together with its action', () => {
   it('a failed ban action leaves the card open, a second press works, a third does nothing', async () => {
     await h.db.query(`INSERT INTO chats (chat_id, title, observation_started_at, created_at) VALUES ($1,'t',$2,$2) ON CONFLICT DO NOTHING`, [CHAT, h.clock.now()])
     await seedMember(h, CAROL)

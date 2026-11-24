@@ -41,7 +41,7 @@ async function resumeAccepted(ctx: Ctx, chatId: number, userId: number, ban: Ban
 }
 
 /**
- * Section 3.6: the button lifts the automatic sanction at once, no explanation and no model.
+ * Section 3.6 (decision of the owner 29.10): the button lifts the automatic sanction at once, no explanation and no model.
  * One press per member, after the first bath only; a channel has no appeal in the Mini App (section 3.6.4). A sanction of an
  * administrator is lifted only by the administrators: the member asks them (section 3.6.5).
  */

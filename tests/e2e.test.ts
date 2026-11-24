@@ -13,7 +13,7 @@ import { CHAT, createDatabase } from './support/harness.js'
 import { buildClient } from './support/web.js'
 
 // The whole path through the real entry points (dist-less, via tsx): fake Telegram and fake Jev servers on HTTP,
-// a real PostgreSQL, real long polling, the worker loop and the web process. This is not a live Telegram run.
+// a real PostgreSQL, real long polling, the worker loop and the web process. This is not a live Telegram run (F25).
 
 const TOKEN = '123456:E2E-TOKEN-abcdef'
 const MESSAGE_ID = 4242

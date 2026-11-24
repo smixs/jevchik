@@ -504,7 +504,7 @@
   ],
   "invariants": [
     "spam_review_threshold <= spam_review_delete_threshold",
-    "spam_review_delete_threshold <= spam_auto_threshold",
+    "spam_review_threshold <= spam_auto_threshold",
     "punish_mute_week_karma <= punish_mute_day_karma",
     "punish_mute_day_karma <= punish_media_karma"
   ]

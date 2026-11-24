@@ -494,7 +494,7 @@ function requestScreen(state: Dict): Child[] {
   return [h('h1', {}, 'Разбан'), h('section', { class: 'card' }, h('p', { 'data-field': 'sanction' }, `Вы ${s(state.sanction)}.`), h('p', { class: 'hint' }, 'Это решение админа. Снять его может только админ; попросить можно один раз.'), asked ? h('p', { 'data-field': 'appeal_state' }, REQUEST_TEXT[s(state.status)] ?? 'Просьба недоступна.') : ask, result)]
 }
 
-/** Section 3.6: one button lifts the automatic sanction, nothing to explain. */
+/** Section 3.6 (decision of the owner 29.10): one button lifts the automatic sanction, nothing to explain. */
 async function appealScreen(): Promise<Child[]> {
   const state = await api('/api/appeal')
   if (state.source === 'admin') return requestScreen(state)

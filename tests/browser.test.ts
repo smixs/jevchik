@@ -300,7 +300,7 @@ describe('section 3.8: the Mini App opened without start_param (the "Open App" b
     expect(page.$('p.error')).toBeNull()
   })
 
-  it('a start_param of an unknown chat is refused, and the reason is said plainly', async () => {
+  it('review 2 low: a start_param of an unknown chat is refused, and the reason is said plainly', async () => {
     const page = await open(VECTORS.bob_unknown_ctx)
     await page.waitFor('p.error')
     expect(page.text()).toBe('Этот чат не подключён к Жевчику.')

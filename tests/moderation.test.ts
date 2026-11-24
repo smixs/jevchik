@@ -158,7 +158,7 @@ describe('F15: /report', () => {
 describe('F35: a flag by the reaction 🖕 (section 3.7)', () => {
   const flag = (from = BOB, id = 900, emoji = '🖕') => reaction({ message_id: id, from, new: [emoji] })
   const botReactions = () => h.tg.of('setMessageReaction').map((c) => c.args)
-  /** A member with karma waits for the admins; a newcomer without it goes to the steam room at once. */
+  /** A member with karma waits for the admins; a newcomer without it goes to the steam room at once (decision of the owner 29.10). */
   const withKarma = (user = ALICE, karma = 10) => h.db.query('UPDATE members SET karma = $3 WHERE chat_id = $1 AND user_id = $2', [CHAT, user.id, karma])
   const flagCards = () => adminCards().filter((c) => String(c.args[1]).includes('Участник пожаловался'))
 

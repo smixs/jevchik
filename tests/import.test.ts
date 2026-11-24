@@ -296,7 +296,7 @@ describe('T-import-resume and T-import-race', () => {
   })
 })
 
-describe('an import request carries sender_history (section 3.6.0)', () => {
+describe('review 6: an import request carries sender_history (section 3.6.0)', () => {
   it('counted over the sorted import and the messages of the author already in the chat, on the wire', async () => {
     const server = await fakeServer((_s, _i, res) => reply(res, 200, { answers: {} }))
     h.ctx.jev = new HttpJevClient('KEY-1', `${server.url}/v1/systemone`, 2000)

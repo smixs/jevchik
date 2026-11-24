@@ -66,7 +66,7 @@ function banParts(ops: Ops, data: Flow['data']): Parts {
   return parts
 }
 
-/** Only a refusal of rights is a ban on writing; a 400 (the length, anything else) is Telegram's refusal. */
+/** Only a refusal of rights is a ban on writing; a 400 (the length, anything else) is Telegram's refusal (QA r4 D6). */
 const PUBLISH_REASONS = new Set(['no_rights'])
 
 function restoreParts(ops: Ops, data: Flow['data']): Parts {
@@ -182,7 +182,7 @@ const CUT_MARK = ' (обрезано)'
 
 /**
  * Section 3.6.2: `<имя автора>: <текст>`; an attachment gives its caption and a mark of the attachment. The whole stays within
- * the message limit, cut by grapheme clusters with a mark.
+ * the message limit, cut by grapheme clusters with a mark (QA r4 D6).
  */
 function restoredText(held: HeldRow): string {
   const body = held.media_kind ? `[${mediaWord(held.media_kind)}]${held.text ? ` ${held.text}` : ''}` : held.text
@@ -205,7 +205,7 @@ async function publishText(ctx: Ctx, flow: Flow): Promise<StepResult> {
 
 export function registerCardActionFlows(): void {
   registerFlow('card_spam', withReport([checkTarget, ...STEAM_ACTION_STEPS], decide))
-  // the role of the target is checked before the message is touched; an admin, the owner or an unknown role stops it.
+  // QA r4 D4: the role of the target is checked before the message is touched; an admin, the owner or an unknown role stops it.
   registerFlow('card_ban', withReport([checkTarget, deleteIfInChat, markDeleted, banCall, adminBanRecord], decide))
   registerFlow('card_restore', withReport([liftSanction, dropRecord, publishText], decide))
   registerFlow('card_unban', withReport([liftSanction, requestJokes, dropRecord], decide))
@@ -290,7 +290,7 @@ export async function startAction(ctx: Ctx, q: Q, pressed: { cardId: number; act
   if (await busy(q, card)) return { refused: 'busy' }
   const key = `cardaction:${card.card_id}:${action}`
   const data: Record<string, unknown> = { ...(await flowData(q, card, action, state)), adminName: pressed.admin.name, ...jokePicks(ctx.rng) }
-  // «Не спам» on a message still in the chat whose author was sanctioned lifts the sanction, publishes nothing.
+  // Review 2, blocker 3: «Не спам» on a message still in the chat whose author was sanctioned lifts the sanction, publishes nothing.
   const kind = action === 'notspam' && state.sanctioned ? 'card_unsanction' : FLOW_KINDS[action]
   if (kind === 'card_unsanction') data.unsanction = true
   if (kind === 'card_note') data.note = await note(q, card, action)

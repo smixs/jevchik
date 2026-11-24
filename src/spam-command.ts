@@ -168,7 +168,7 @@ async function adminTarget(ctx: Ctx, flow: Flow): Promise<StepResult> {
 }
 
 /** Section 3.6.2: the admin who sent /spam gets the result in private, with the button «Не спам, вернуть». */
-/** a command refused for any reason (the target, an unknown role) drops the copy it made, never anybody else's. */
+/** Review 2: a command refused for any reason (the target, an unknown role) drops the copy it made, never anybody else's. */
 async function dropOwnCopy(ctx: Ctx, flow: Flow): Promise<void> {
   if (flow.data.heldByCommand !== true) return
   await ctx.db.query(`DELETE FROM held_texts WHERE chat_id = $1 AND message_id = $2 AND reason = 'spam'`, [flow.chatId, flow.data.messageId])

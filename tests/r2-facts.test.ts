@@ -13,7 +13,7 @@ afterEach(async () => {
 
 const usefulness = (score: unknown, confidence: unknown) => ({ usefulness: { type: 'score', score, confidence } }) as never
 
-describe('an out-of-range score or confidence is "no data"', () => {
+describe('R2-8: an out-of-range score or confidence is "no data"', () => {
   it('facts', () => {
     for (const [score, confidence] of [[999, 0.9], [-1, 0.9], [4.01, 0.9], [4, 99], [4, -0.1], [4, 'high'], [Number.NaN, 0.5]]) {
       expect(extractFacts(usefulness(score, confidence)), `${score}/${confidence}`).toMatchObject({ level: null, confidence: null })

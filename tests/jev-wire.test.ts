@@ -8,7 +8,7 @@ import { fakeServer, reply, type Fake } from './support/http.js'
 import { ALICE, BOB, CAROL, CHAT, botJoined, createHarness, karmaOf, message, restartHarness, type Harness } from './support/harness.js'
 
 const questions = JSON.parse(readFileSync(new URL('../eval/questions.json', import.meta.url), 'utf8'))
-/** The four spam questions of section 3.6.0. */
+/** The four spam questions of section 3.6.0, as the lead gave them (docs/spec.md, version 8). */
 const SPAM_QUESTIONS = {
   spam_earnings_crypto: {
     type: 'noul',

@@ -5,7 +5,8 @@ import { ADMIN, CHAT, createHarness, message, pastObservation, type Harness, typ
 // Section 3.6.0: a newcomer is somebody the bot saw joining the chat. Whoever was in the chat before the bot came is never
 // judged by the text or by the profile, however few of their messages the bot knows (a chat connected without its history).
 
-const SPAM = 'Заработай 500 долларов в день без вложений, пиши в личку!'
+// Exercise model-scored spam here; phrase overrides have their own pipeline tests.
+const SPAM = 'Заработай 500 долларов в день, подробности на сайте!'
 const OLD: User = { id: 41, first_name: 'Olga' }
 const NEW: User = { id: 42, first_name: 'Nick' }
 let h: Harness

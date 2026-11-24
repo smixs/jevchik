@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ADMIN, BOB, CAROL, CHAT, command, createHarness, message, pastObservation, type Harness, type User } from './support/harness.js'
 
-// Spec 3.6.0: messages not from people are not judged, do not count in karma or in the message count, and are never the
+// Spec 3.6.0 (v10): messages not from people are not judged, do not count in karma or in the message count, and are never the
 // target of /spam, /report or card buttons. People's replies to them are judged as usual.
 
 const SPAM = 'Заработай 500 долларов в день без вложений, пиши в личку!'
@@ -23,7 +23,7 @@ afterEach(async () => {
 const autoForward = (id: number, text = SPAM) => message({ id, from: TELEGRAM, text, extra: { is_automatic_forward: true, sender_chat: CHANNEL, forward_origin: { type: 'channel', chat: CHANNEL, message_id: 5, date: 0 } } })
 const sanctions = () => h.tg.calls.filter((c) => ['deleteMessage', 'restrictChatMember', 'banChatMember'].includes(c.method)).map((c) => [c.method, ...c.args])
 
-describe('a post auto-forwarded from the linked channel', () => {
+describe('QA r4 D2: a post auto-forwarded from the linked channel', () => {
   it('is not judged, not deleted, and nobody is muted; it counts nowhere', async () => {
     await h.send(autoForward(700))
     await h.app.settle()
@@ -34,7 +34,7 @@ describe('a post auto-forwarded from the linked channel', () => {
     expect(await h.db.query('SELECT 1 FROM admin_cards')).toEqual([])
   })
 
-  // Section 3.6.4: a channel writing in the group is a member (tests/channels.test.ts); the group itself is not.
+  // Section 3.6.4 (spec v11): a channel writing in the group is a member (tests/channels.test.ts); the group itself is not.
   it('a message on behalf of the group itself (an anonymous admin) is not judged either', async () => {
     await h.send(message({ id: 702, from: { id: 1087968824, first_name: 'Group', is_bot: true }, text: SPAM, extra: { sender_chat: { id: CHAT, type: 'supergroup', title: 'c' } } }))
     await h.app.settle()
@@ -81,7 +81,7 @@ describe('a post auto-forwarded from the linked channel', () => {
   })
 })
 
-describe('in a forum, a reply to the service message that created the topic is no reply', () => {
+describe('QA r4 D3: in a forum, a reply to the service message that created the topic is no reply', () => {
   const topicRoot = { message_id: 500, date: 0, chat: { id: CHAT, type: 'supergroup' }, from: BOB, forum_topic_created: { name: 'Тема', icon_color: 1 } }
   const inTopic = { is_topic_message: true, message_thread_id: 500, reply_to_message: topicRoot }
 

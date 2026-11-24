@@ -33,7 +33,7 @@ async function run(rounds = 10): Promise<void> {
   }
 }
 
-describe('the chat id of the export', () => {
+describe('R2-5: the chat id of the export', () => {
   it('a supergroup accepts only its own id and the id without the -100 prefix', () => {
     expect(exportIdMatches(-1001234567890, -1001234567890)).toBe(true)
     expect(exportIdMatches(-1001234567890, 1234567890)).toBe(true)
@@ -56,7 +56,7 @@ describe('the chat id of the export', () => {
   })
 })
 
-describe('an import only adds, and never starts punishments', () => {
+describe('R2-6: an import only adds, and never starts punishments', () => {
   it('negative or zero amounts are skipped, no punishment flows are created', async () => {
     let base = 0
     const set = async (key: string, value: unknown) => {
@@ -89,7 +89,7 @@ describe('an import only adds, and never starts punishments', () => {
   })
 })
 
-describe('the file and the job', () => {
+describe('R2-9: the file and the job', () => {
   it('the file is written before the job is published: an unwritable directory leaves no job', async () => {
     rmSync(h.importDir, { recursive: true, force: true })
     writeFileSync(h.importDir, 'not a directory')
@@ -125,7 +125,7 @@ describe('the file and the job', () => {
   })
 })
 
-describe('a message is asked at most three times, and evaluated messages are not asked again', () => {
+describe('R2-10: a message is asked at most three times, and evaluated messages are not asked again', () => {
   it('a message that always fails is skipped as "not processed" and the import goes on', async () => {
     const asked: Record<string, number> = {}
     const original = h.jev.evaluate.bind(h.jev)

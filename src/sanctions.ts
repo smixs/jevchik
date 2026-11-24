@@ -33,7 +33,7 @@ export interface DecideInput {
   isFirst: boolean
   /** Section 3.6.0: the text is judged for a newcomer (and on probation); for anybody else the spam score leads to nothing. */
   judged: boolean
-  /** Spec 3.6.0: the profile rule applies only to a newcomer by the message count. */
+  /** Spec 3.6.0 (v10): the profile rule applies only to a newcomer by the message count. */
   newcomer: boolean
   probation: boolean
   spam: number | null
@@ -267,7 +267,7 @@ export async function banCall(ctx: Ctx, flow: Flow): Promise<StepResult> {
 }
 
 async function banRecord(ctx: Ctx, flow: Flow): Promise<StepResult> {
-  // an administrator may have taken the record over while the call was on its way: theirs is not touched.
+  // Review (Sol) 3: an administrator may have taken the record over while the call was on its way: theirs is not touched.
   await ctx.db.query(`UPDATE bans SET state = 'banned' WHERE ban_id = $1 AND state = 'steam' AND source = 'auto'`, [flow.data.banId])
   return 'ok'
 }
@@ -301,7 +301,7 @@ export async function liftStep(ctx: Ctx, flow: Flow): Promise<StepResult> {
 
 /**
  * Section 3.6.5: a request to lift a sanction belongs to that sanction. When the sanction is replaced, lifted or over, its open
- * request cards are closed, so that an old button never decides about a new sanction. The card whose own button
+ * request cards are closed, so that an old button never decides about a new sanction (review Sol 5). The card whose own button
  * is being carried out is closed by its flow.
  */
 export async function closeRequests(q: Q, chatId: number, userId: number, except: number | null = null): Promise<void> {
@@ -350,7 +350,7 @@ export async function unbanRecord(ctx: Ctx, flow: Flow): Promise<StepResult> {
   return 'ok'
 }
 
-/** Every flow that changes the sanction of a member: while one runs, an administrator waits. */
+/** Every flow that changes the sanction of a member: while one runs, an administrator waits (review Sol 2, 3). */
 export const SANCTION_FLOWS = ['app_steam', 'app_ban', 'app_unban', 'steam', 'ban', 'unban', 'admin_ban', 'card_spam', 'card_ban', 'card_restore', 'card_unban', 'card_unsanction']
 
 /**

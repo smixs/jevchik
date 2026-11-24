@@ -16,7 +16,8 @@ import { get, makeWeb } from './support/web.js'
 // member and the category in words, gives the confidence and what the bot did or asks for. The text is kept for at most 30
 // days (section 3.10).
 
-const SPAM = 'Заработай 500 долларов в день без вложений, пиши в личку!'
+// Exercise model-scored spam here; phrase overrides have their own pipeline tests.
+const SPAM = 'Заработай 500 долларов в день, подробности на сайте!'
 const MILD = 'Посмотрите мой курс по промптам со скидкой'
 const DAN: User = { id: 4, first_name: 'Dan', username: 'dan_spam' }
 const NO_NAME_LINK = (id: number): string => `https://t.me/c/1234567890/${id}`

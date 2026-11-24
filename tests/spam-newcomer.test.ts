@@ -58,7 +58,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
     expect(await h.db.query('SELECT kind FROM admin_cards')).toEqual([{ kind: 'review' }])
   })
 
-  it('an edit of an early message by a member past the count gives neither a sanction nor a card', async () => {
+  it('review 1: an edit of an early message by a member past the count gives neither a sanction nor a card', async () => {
     await history(CAROL, 6)
     await h.send(edited({ id: 600, from: CAROL, text: SPAM, edit_date: '2026-09-09T12:30:00Z' }))
     h.jev.script(SPAM, { spam_earnings_crypto: 0.95 })
@@ -68,7 +68,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
     expect(await h.db.query('SELECT 1 FROM bans')).toEqual([])
   })
 
-  it('spec 3.6.0: a new message counts the messages sent not later than it; a delayed evaluation is not changed by later ones', async () => {
+  it('spec 3.6.0 (v10): a new message counts the messages sent not later than it; a delayed evaluation is not changed by later ones', async () => {
     await history(CAROL, 4)
     h.jev.script(MILD, { spam_other_offer: 0.5 })
     await h.send(message({ id: 700, from: CAROL, text: MILD }))
@@ -77,7 +77,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
     expect(await h.db.query(`SELECT kind, payload->>'messageId' AS id FROM admin_cards`)).toEqual([{ kind: 'review', id: '700' }])
   })
 
-  it('spam as the first message followed at once by five more is still deleted and the author muted', async () => {
+  it('QA r4 D1: spam as the first message followed at once by five more is still deleted and the author muted', async () => {
     h.jev.script(SPAM, { spam_earnings_crypto: 0.99 })
     await h.send(message({ id: 700, from: CAROL, text: SPAM }))
     for (let i = 1; i <= 5; i++) await h.send(message({ id: 700 + i, from: CAROL, text: `ещё ${i}` }))
@@ -87,7 +87,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
     expect(await h.db.query(`SELECT kind, payload->>'messageId' AS id FROM admin_cards`)).toEqual([{ kind: 'steamed', id: '700' }])
   })
 
-  it('a softer edit of a carded message by a member now past the count gives no edit card', async () => {
+  it('review 4: a softer edit of a carded message by a member now past the count gives no edit card', async () => {
     await history(CAROL, 1)
     h.jev.script(MILD, { spam_other_offer: 0.35 })
     await h.send(message({ id: 700, from: CAROL, text: MILD }))
@@ -98,7 +98,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
     expect(await h.db.query('SELECT kind FROM admin_cards ORDER BY card_id')).toEqual([{ kind: 'review' }])
   })
 
-  it('a captionless media that cannot be described gives a card for a newcomer only, by the message count', async () => {
+  it('review 5: a captionless media that cannot be described gives a card for a newcomer only, by the message count', async () => {
     const photo = (id: string) => ({ photo: [{ file_id: id, file_unique_id: `u-${id}`, width: 1, height: 1, file_size: 100 }] })
     h.vision.failure = new Error('502')
     await seedMember(h, DAN)
@@ -173,7 +173,7 @@ describe('F28: spam by text is judged only for a newcomer (section 3.6.0)', () =
     expect(await h.db.query('SELECT kind, payload->>\'messageId\' AS id FROM admin_cards')).toEqual([{ kind: 'protected', id: '701' }])
   })
 
-  it('spec 3.6.0, an advertising profile does not touch a member with an imported history on the first live message', async () => {
+  it('spec 3.6.0 (v10), QA r4 R1: an advertising profile does not touch a member with an imported history on the first live message', async () => {
     await seedMember(h, DAN)
     for (let id = 1; id <= 6; id++) {
       await h.db.query(`INSERT INTO messages (chat_id, message_id, author_id, posted_at) VALUES ($1,$2,$3,'2026-08-01T00:00:00Z')`, [CHAT, id, DAN.id])
@@ -288,7 +288,7 @@ describe('migration 008: open cards about messages of members past the count are
       { chat_id: OTHER_CHAT, kind: 'review', id: '10', status: 'open', resolution: null },
     ])
   })
-  it('a card the migration closed is never delivered', async () => {
+  it('review 7: a card the migration closed is never delivered', async () => {
     await messages(CHAT, CAROL.id, 6, 10)
     await card(CHAT, 'would_do', CAROL.id, 10)
     await h.db.query(`DELETE FROM schema_migrations WHERE name IN ('008_spam_newcomer.sql', '009_close_edit_lowered.sql')`)

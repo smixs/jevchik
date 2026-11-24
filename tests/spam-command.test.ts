@@ -115,7 +115,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(await h.db.query('SELECT deleted FROM messages WHERE message_id = 900')).toEqual([{ deleted: false }])
   })
 
-  it('a refused command neither creates nor changes a kept text, before and after the check', async () => {
+  it('review 2: a refused command neither creates nor changes a kept text, before and after the check', async () => {
     await h.send(spam({ from: BOB }))
     expect(await h.db.query('SELECT 1 FROM held_texts')).toEqual([])
     await h.app.settle()
@@ -127,7 +127,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(await h.db.query('SELECT text, reason, expires_at, created_at FROM held_texts')).toEqual([{ text: 'старая копия', reason: 'card', expires_at: kept, created_at: kept }])
   })
 
-  it('the text is kept only once the right is confirmed', async () => {
+  it('review 2: the text is kept only once the right is confirmed', async () => {
     await h.send(spam())
     expect(await h.db.query('SELECT 1 FROM held_texts')).toEqual([])
     await h.app.settle()
@@ -135,7 +135,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(JSON.stringify(await h.db.query(`SELECT data FROM flows WHERE kind = 'spam_command'`))).not.toContain(TARGET)
   })
 
-  it('a refused command from a member, then an admin command on the same message: the kept text stays', async () => {
+  it('review 3: a refused command from a member, then an admin command on the same message: the kept text stays', async () => {
     await h.send(spam({ from: BOB, id: 950 }))
     await h.send(spam({ from: ADMIN, id: 951 }))
     await h.app.settle()
@@ -144,7 +144,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(h.tg.of('deleteMessage').map((c) => c.args[1]).sort()).toEqual([900, 950, 951])
   })
 
-  it('a refused deletion of the command gives a card about it, and the sanction goes on', async () => {
+  it('review 8: a refused deletion of the command gives a card about it, and the sanction goes on', async () => {
     h.tg.fail('deleteMessage', tgError.bad("Bad Request: message can't be deleted"))
     await h.send(command({ id: 950, from: ADMIN, text: '/spam', date: h.clock.now().toISOString(), reply_to: { message_id: 900, from: ALICE, text: TARGET } }))
     await h.app.settle()
@@ -161,7 +161,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(await h.db.query('SELECT kind FROM admin_cards ORDER BY card_id')).toEqual([{ kind: 'delete_denied' }, { kind: 'spam_command' }])
   })
 
-  it('/spam from an anonymous admin or on behalf of a channel: no sanction, only the command is removed', async () => {
+  it('review 9: /spam from an anonymous admin or on behalf of a channel: no sanction, only the command is removed', async () => {
     const anonymous = { id: 1087968824, first_name: 'Group', username: 'GroupAnonymousBot', is_bot: true }
     const channelBot = { id: 136817688, first_name: 'Channel', username: 'Channel_Bot', is_bot: true }
     const reply_to = { message_id: 900, from: ALICE, text: TARGET }
@@ -176,7 +176,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(await h.db.query('SELECT 1 FROM held_texts')).toEqual([])
   })
 
-  it('the text carried by the command lives at most 24 hours in the flow; the cleanup erases it', async () => {
+  it('review 2 high: the text carried by the command lives at most 24 hours in the flow; the cleanup erases it', async () => {
     await h.send(spam())
     const pending = async () => (await h.db.query(`SELECT data ? 'pending' AS p FROM flows WHERE kind = 'spam_command'`))[0].p
     expect(await pending()).toBe(true)
@@ -189,7 +189,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(JSON.stringify(await h.db.query('SELECT data FROM flows'))).not.toContain(TARGET)
   })
 
-  it('a command refused because of the target removes the copy it made, and only that one', async () => {
+  it('review 2 high: a command refused because of the target removes the copy it made, and only that one', async () => {
     h.tg.members.set(ALICE.id, 'administrator')
     await h.send(spam())
     await h.app.settle()
@@ -202,7 +202,7 @@ describe('F29: the admin command /spam (section 3.6.0)', () => {
     expect(await h.db.query('SELECT text, reason, expires_at FROM held_texts')).toEqual([{ text: 'копия карточки', reason: 'card', expires_at: kept }])
   })
 
-  it('a command refused because the role of the target cannot be checked removes its copy too', async () => {
+  it('review 2 high: a command refused because the role of the target cannot be checked removes its copy too', async () => {
     const original = h.tg.getChatMember.bind(h.tg)
     h.tg.getChatMember = async (chatId: number, userId: number) => {
       if (userId === ALICE.id) throw tgError.server()

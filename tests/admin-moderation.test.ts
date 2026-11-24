@@ -223,7 +223,7 @@ describe('F32: the member asks the administrators to lift the sanction', () => {
   })
 })
 
-describe('one sanction, one request; the model never decides about a record of an administrator', () => {
+describe('review Sol: one sanction, one request; the model never decides about a record of an administrator', () => {
   const requestCard = async (): Promise<{ card_id: number; status: string; resolution: string | null }> =>
     (await h.db.query<{ card_id: number; status: string; resolution: string | null }>(`SELECT card_id, status, resolution FROM admin_cards WHERE kind = 'unban_request' ORDER BY card_id DESC LIMIT 1`))[0]
 
@@ -323,7 +323,7 @@ describe('F33: «Боты в рейтинге»', () => {
     expect((await h.db.query('SELECT tag_text FROM members WHERE chat_id = $1 AND user_id = $2', [CHAT, HELPER]))[0].tag_text).toBeNull()
   })
 
-  it('a tag somebody else put on the bot since is not erased when the checkbox goes off', async () => {
+  it('review Sol 9: a tag somebody else put on the bot since is not erased when the checkbox goes off', async () => {
     await toggle(true)
     await h.app.settle()
     h.tg.tags.set(HELPER, 'мой бот')

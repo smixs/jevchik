@@ -167,7 +167,7 @@ describe('F30: the buttons of a spam card and the answer of the bot (section 3.6
     expect(await h.db.query('SELECT state FROM bans')).toEqual([{ state: 'banned' }])
   })
 
-  it('«Забанить» checks the role of the target first: an admin or the owner loses neither the message nor the right', async () => {
+  it('QA r4 D4: «Забанить» checks the role of the target first: an admin or the owner loses neither the message nor the right', async () => {
     for (const status of ['administrator', 'creator'] as const) {
       await h.close()
       h = await createHarness()
@@ -187,7 +187,7 @@ describe('F30: the buttons of a spam card and the answer of the bot (section 3.6
     }
   })
 
-  it('«Забанить» when the role of the target cannot be checked: neither deletion nor ban, the card says so', async () => {
+  it('QA r4 D4: «Забанить» when the role of the target cannot be checked: neither deletion nor ban, the card says so', async () => {
     const id = await reviewCard()
     const original = h.tg.getChatMember.bind(h.tg)
     h.tg.getChatMember = async (chatId: number, userId: number) => {
@@ -312,7 +312,7 @@ describe('F30: the buttons of a spam card and the answer of the bot (section 3.6
   })
 })
 
-describe('the buttons follow the sanction first', () => {
+describe('review 2 blocker 3: the buttons follow the sanction first', () => {
   it('the message stayed in the chat but the member is banned: «Не спам» lifts the ban and removes the record, nothing is published again', async () => {
     const id = await reviewCard()
     h.tg.fail('deleteMessage', tgError.bad('Forbidden: not enough rights to delete a message', 403))
@@ -342,7 +342,7 @@ describe('the buttons follow the sanction first', () => {
   })
 })
 
-describe('every card about a message has the buttons of its actual state', () => {
+describe('QA r4 D5: every card about a message has the buttons of its actual state', () => {
   it('«Не смог удалить сообщение» after an automatic deletion: the member is muted, the message is in the chat', async () => {
     h.tg.fail('deleteMessage', tgError.bad('Forbidden: not enough rights to delete a message', 403))
     await h.send(message({ id: 700, from: CAROL, text: SPAM, date: h.clock.now().toISOString() }))
@@ -401,7 +401,7 @@ describe('F30: T-card-edit and T-restore (section 4)', () => {
     expect(await h.db.query('SELECT 1 FROM bans')).toEqual([])
   })
 
-  it('a 4096-character message comes back within the Telegram limit, cut by grapheme clusters with a mark', async () => {
+  it('QA r4 D6: a 4096-character message comes back within the Telegram limit, cut by grapheme clusters with a mark', async () => {
     const long = 'я'.repeat(4096)
     h.jev.script(long, { spam_earnings_crypto: 0.95 })
     await h.send(message({ id: 700, from: CAROL, text: long }))
@@ -412,7 +412,7 @@ describe('F30: T-card-edit and T-restore (section 4)', () => {
     expect(sent.length).toBe(4096)
   })
 
-  it('wide clusters are never broken when the text is cut', async () => {
+  it('QA r4 D6: wide clusters are never broken when the text is cut', async () => {
     const family = '👨‍👩‍👧'
     const long = family.repeat(600)
     h.jev.script(long, { spam_earnings_crypto: 0.95 })
@@ -425,7 +425,7 @@ describe('F30: T-card-edit and T-restore (section 4)', () => {
     expect(body).toBe(family.repeat(body.length / family.length))
   })
 
-  it('a refusal of Telegram other than a ban on writing is not called one', async () => {
+  it('QA r4 D6: a refusal of Telegram other than a ban on writing is not called one', async () => {
     const id = await steamedCard()
     h.tg.fail('sendMessage', tgError.bad('Bad Request: message is too long'))
     await press(id, 'restore')

@@ -105,7 +105,7 @@ const LABELS: Record<CardAction, string> = {
 
 /**
  * The cards about a message whose buttons follow the state of the message and of the sanction (section 3.6.2), failures of an
- * automatic deletion included.
+ * automatic deletion included (QA r4 D5).
  */
 export const SPAM_KINDS = new Set<CardKind>(['steamed', 'review', 'flagged', 'protected', 'media_unverified', 'edit_lowered', 'target_admin', 'delete_denied', 'no_rights', 'op_failed'])
 

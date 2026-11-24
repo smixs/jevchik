@@ -23,7 +23,7 @@ afterEach(async () => {
 
 const ban = async () => (await h.db.query('SELECT state, appeal_status FROM bans WHERE user_id = $1', [CAROL.id]))[0]
 
-describe('F9: the button lifts the steam room', () => {
+describe('F9: the button lifts the steam room (decision of the owner 29.10)', () => {
   it('one press: no explanation and no Jev, the restriction is lifted, the record is removed, probation starts', async () => {
     expect(await appealState(h.ctx, CHAT, CAROL.id)).toEqual({ status: 'none', allowed: true })
     const result = await submitAppeal(h.ctx, CHAT, CAROL.id)

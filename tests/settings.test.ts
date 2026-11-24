@@ -140,13 +140,46 @@ describe('settings failures', () => {
     expect(await h.db.query('SELECT 1 FROM settings_audit')).toEqual([])
   })
 
-  it('mutual invariants: review <= review_delete <= auto', async () => {
+  it('mutual invariants: review <= review_delete and review <= auto', async () => {
     await expect(change('spam_review_threshold', 0.6, 0)).rejects.toThrow('violates')
-    await expect(change('spam_auto_threshold', 0.4, 0)).rejects.toThrow('violates')
+    await expect(change('spam_auto_threshold', 0.29, 0)).rejects.toThrow('violates')
     await change('spam_review_delete_threshold', 0.6, 0)
     await expect(change('spam_review_threshold', 0.65, 0)).rejects.toThrow('violates')
     await change('spam_review_threshold', 0.6, 0)
     await expect(change('punish_mute_week_karma', -5, 0)).rejects.toThrow('violates')
+  })
+
+  it('31.10: auto 0.46 preserves the unused delete threshold, review 0.45 and other chats', async () => {
+    const otherChat = -1009876543210
+    await h.send(botJoined(otherChat))
+    await change('spam_review_delete_threshold', 0.6, 0)
+    await change('spam_review_threshold', 0.45, 0)
+    const beforeOther = await getSettingsWithVersions(h.db, otherChat)
+    const before = await getSettingsWithVersions(h.db, CHAT)
+    expect(await change('spam_auto_threshold', 0.46, 0)).toEqual({ version: 1 })
+    const after = await getSettingsWithVersions(h.db, CHAT)
+    expect(after).toEqual({
+      values: { ...before.values, spam_auto_threshold: 0.46 },
+      versions: { ...before.versions, spam_auto_threshold: 1 },
+    })
+    expect(await getSettingsWithVersions(h.db, otherChat)).toEqual(beforeOther)
+    expect((await listAudit(h.db, CHAT))[0]).toEqual({
+      key: 'spam_auto_threshold', version: 1, old_value: 0.6, new_value: 0.46,
+      changed_by: ADMIN.id, changed_at: h.clock.now(),
+    })
+    await pastObservation(h)
+    for (const [id, spam, chat] of [[701, 0.46, CHAT], [702, 0.45, CHAT], [703, 0.449, CHAT], [704, 0.46, otherChat]]) {
+      const text = `оценка сообщения ${id}`
+      h.jev.script(text, { spam_other_offer: spam })
+      await h.send(message({ id, chat, from: { id, first_name: `User ${id}` }, text }))
+    }
+    await h.app.settle()
+    expect(h.tg.of('deleteMessage').map((c) => c.args.slice(0, 2))).toEqual([[CHAT, 701]])
+    expect(await h.db.query("SELECT chat_id, payload->>'messageId' AS id FROM admin_cards WHERE kind = 'review' ORDER BY chat_id, id"))
+      .toEqual([{ chat_id: otherChat, id: '704' }, { chat_id: CHAT, id: '702' }])
+    await expect(change('spam_auto_threshold', 0.44, 1)).rejects.toThrow('violates')
+    await expect(change('spam_review_threshold', 0.47, 1)).rejects.toThrow('violates')
+    await expect(change('spam_review_delete_threshold', 0.44, 1)).rejects.toThrow('violates')
   })
 
   it('nullable values: observation_until may be cleared', async () => {
@@ -216,7 +249,7 @@ describe('settings through the API', () => {
   })
 })
 
-describe('migration 014: from 0.6 the bot removes spam itself', () => {
+describe('migration 014: from 0.6 the bot removes spam itself (decision of the owner 29.10)', () => {
   const migration = readFileSync(new URL('../src/migrations/014_spam_auto_60.sql', import.meta.url), 'utf8')
 
   it('stored thresholds above 0.6 get a new version 0.6 by nobody; lower ones and other chats stay; a second run changes nothing', async () => {

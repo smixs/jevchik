@@ -64,7 +64,7 @@ describe('section 3.6.0: the text is judged only for a newcomer', () => {
     expect(run({ judged: true, karma: 100, spam: 0.3 })).toEqual({ rule: 2, action: 'card_protected' })
   })
 
-  it('spec 3.6.0: the profile rule applies to a newcomer only, probation or not', () => {
+  it('spec 3.6.0 (v10): the profile rule applies to a newcomer only, probation or not', () => {
     expect(run({ judged: false, newcomer: false, isFirst: true, profilePromo: 0.95 })).toEqual({ rule: 6, action: 'none' })
     expect(run({ judged: true, newcomer: false, probation: true, isFirst: true, profilePromo: 0.95 })).toEqual({ rule: 6, action: 'none' })
     expect(run({ newcomer: true, isFirst: true, profilePromo: 0.8 })).toEqual({ rule: 3, action: 'steam' })

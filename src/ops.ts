@@ -275,7 +275,7 @@ function isKarmaForm(tag: string, template: string): boolean {
   return new RegExp(`^${template.split('{n}').map(escapeRegExp).join('[+-]?\\d+')}$`).test(tag)
 }
 
-/** The role and the current tag come from the same answer; a tag a person set is never overwritten. */
+/** The role and the current tag come from the same answer; a tag a person set is never overwritten (lead decision). */
 function tagIsPresent(member: ChatMemberInfo, want: { tag: string; last: string | null; template: string }): boolean {
   if (member.status === 'creator' || member.status === 'administrator') throw new TagRefusal('target_admin')
   const current = member.tag ?? ''
@@ -293,7 +293,7 @@ async function foundBot(ctx: Ctx, op: Row, botsIn: boolean): Promise<boolean> {
 /** With `bots_in_rating` off a bot carries no karma tag: the one the bot set earlier is taken off. */
 async function clearBotTag(ctx: Ctx, op: Row, row: Row): Promise<Record<string, unknown>> {
   if (row.tag_text === null) return { skipped: true }
-  // only the text this bot set is taken off; a tag somebody put there since stays.
+  // Review (Sol) 9: only the text this bot set is taken off; a tag somebody put there since stays.
   const current = (await ctx.tg.getChatMember(op.chat_id, op.payload.userId)).tag ?? ''
   if (current === row.tag_text) await ctx.tg.setChatMemberTag(op.chat_id, op.payload.userId, '')
   await ctx.db.query('UPDATE members SET tag_text = NULL, tag_set_at = $3 WHERE chat_id = $1 AND user_id = $2', [op.chat_id, op.payload.userId, ctx.clock.now()])
