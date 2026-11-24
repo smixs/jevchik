@@ -240,7 +240,7 @@ async function proposalsFor(q: Q, chat: ChatReport, to: Date): Promise<string[]>
 /** Section 3.6.8: what the door decided in the window, by the time of the decision. */
 async function gateCounts(q: Q, chatId: number, from: Date, to: Date): Promise<GateCounts> {
   const rows = await q.query<GateCounts>(
-    `SELECT count(*) FILTER (WHERE status = 'passed')::int AS passed,
+    `SELECT count(*) FILTER (WHERE status = 'passed' AND send = 'done')::int AS passed,
             count(*) FILTER (WHERE status = 'failed' AND reason = 'missed')::int AS missed,
             count(*) FILTER (WHERE status = 'timeout')::int AS timeout,
             count(*) FILTER (WHERE status = 'failed' AND reason = 'daily_limit')::int AS "limit",

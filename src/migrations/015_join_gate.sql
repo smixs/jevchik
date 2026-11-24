@@ -15,7 +15,11 @@ CREATE TABLE gate_checks (
   status       text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'passed', 'failed', 'timeout', 'gone', 'used')),
   -- Why the check closed: missed, daily_limit, joined (an admin let them in), door_failed (no window), replaced.
   reason       text,
-  send         text NOT NULL DEFAULT 'none' CHECK (send IN ('none', 'todo', 'sending', 'done', 'failed')),
+  -- The window of a join check: todo (written, not opened yet), opening (being opened), open (the guard or the private
+  -- message took it), lost (neither did). A check whose window was not surely open is never declined for silence.
+  door         text NOT NULL DEFAULT 'none' CHECK (door IN ('none', 'todo', 'opening', 'open', 'lost')),
+  -- skipped: the answer of an old check is not sent once a newer request of the same person came (it would reach the new one).
+  send         text NOT NULL DEFAULT 'none' CHECK (send IN ('none', 'todo', 'sending', 'done', 'failed', 'skipped')),
   send_until   timestamptz,
   send_tries   smallint NOT NULL DEFAULT 0,
   -- The last refusal of Telegram for the answer, when there was one.
