@@ -1,11 +1,13 @@
+import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { loadJokes } from '../src/sanctions.js'
-import { CHAT, createHarness, type Harness } from './support/harness.js'
-import { VECTORS } from './support/vectors.js'
+import { changeSetting } from '../src/settings/settings.js'
+import { CHAT, chatOf, createHarness, type Harness } from './support/harness.js'
+import { BOT_TOKEN, VECTORS } from './support/vectors.js'
 import { openPage, type Page, type Patch } from './support/page.js'
 import { buildClient, makeWeb, seedWorld } from './support/web.js'
 
@@ -32,7 +34,7 @@ afterAll(async () => {
   await h.close()
 })
 
-const open = (initData: string, options: { patch?: Patch; motion?: boolean } = {}): Promise<Page> => openPage({ base, bundle }, initData, options)
+const open = (initData: string, options: { patch?: Patch; motion?: boolean; path?: string } = {}): Promise<Page> => openPage({ base, bundle }, initData, options)
 
 const field = (page: Page, name: string): string => page.$(`[data-field="${name}"] b`)?.textContent ?? ''
 
@@ -197,7 +199,12 @@ describe('the appeal and admin screens', () => {
     expect(page.$('button[data-action=unban]')?.textContent).toBe('Разбанить меня')
     expect(page.text()).not.toContain('Своими словами')
     await page.click('button[data-action=unban]')
-    for (let i = 0; i < 100 && !page.$('[data-field=appeal_result]')?.textContent; i++) await new Promise((r) => setTimeout(r, 20))
+    // Section 3.6.8: the button asks for the frog among six animals first.
+    await page.waitFor('[data-field=beasts] button[data-slot]')
+    expect(page.$$('[data-field=beasts] button[data-slot]').length).toBe(6)
+    const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal'`))[0].puzzle.slots as string[]
+    await page.click(`button[data-slot="${slots.indexOf('frog')}"]`)
+    for (let i = 0; i < 100 && !page.$('[data-field=appeal_result]')?.textContent?.includes('ограничение'); i++) await new Promise((r) => setTimeout(r, 20))
     expect(page.$('[data-field=appeal_result]')?.textContent).toContain('ограничение снято')
     expect(h.jev.requests).toEqual([])
   })
@@ -304,5 +311,36 @@ describe('section 3.8: the Mini App opened without start_param (the "Open App" b
     const page = await open(VECTORS.bob_unknown_ctx)
     await page.waitFor('p.error')
     expect(page.text()).toBe('Этот чат не подключён к Жевчику.')
+  })
+})
+
+describe('F36: the door window (section 3.6.8)', () => {
+  const DORA = { id: 501, is_bot: false, first_name: 'Dora' }
+  const guardInit = (query: string): string => {
+    const fields: Record<string, string> = {
+      auth_date: String(Math.floor(h.clock.now().getTime() / 1000)),
+      user: JSON.stringify(DORA),
+      chat: JSON.stringify({ id: CHAT, type: 'supergroup', title: 'Agents chat' }),
+      chat_join_request_query_id: query,
+    }
+    const check = Object.keys(fields).sort().map((k) => `${k}=${fields[k]}`).join('\n')
+    const secret = createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest()
+    return new URLSearchParams({ ...fields, hash: createHmac('sha256', secret).update(check).digest('hex') }).toString()
+  }
+
+  it('six animals without tabs or header; the frog lets in and the window closes itself', async () => {
+    await changeSetting(h.db, { chatId: CHAT, key: 'join_gate', value: true, baseVersion: 0, actor: 99, now: h.clock.now() })
+    await h.send({ update_id: 95_001, chat_join_request: { chat: chatOf(CHAT), from: DORA, user_chat_id: DORA.id, date: 0, query_id: 'qb-1' } } as never)
+    const page = await open(guardInit('qb-1'), { path: '/?door=guard' })
+    await page.waitFor('[data-field=door][data-state=open] [data-field=beasts]')
+    expect(page.$$('[data-field=beasts] button[data-slot]').length).toBe(6)
+    expect(page.$('#nav')?.getAttribute('hidden')).toBe('')
+    expect(page.text()).toContain('Тыкни в лягушонка')
+    const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE query_id = 'qb-1'`))[0].puzzle.slots as string[]
+    await page.click(`button[data-slot="${slots.indexOf('frog')}"]`)
+    await page.waitFor('[data-field=door][data-state=passed]')
+    expect(page.$('[data-field=door_result]')?.textContent).toBe('Пустил. Заходи и веди себя прилично 🐸')
+    expect(h.tg.of('answerChatJoinRequestQuery').map((c) => c.args)).toEqual([['qb-1', 'approve']])
+    await changeSetting(h.db, { chatId: CHAT, key: 'join_gate', value: false, baseVersion: 1, actor: 99, now: h.clock.now() })
   })
 })

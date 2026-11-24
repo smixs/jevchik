@@ -242,10 +242,32 @@ describe('the appeal through the API', () => {
     await h.db.query(`INSERT INTO bans (chat_id, user_id, category, joke_idx, explanation_idx, image_idx, state, steam_until, created_at) VALUES ($1,3,'admin',0,0,0,'steam',$2,$2)`, [CHAT, h.clock.now()])
     await h.db.query('UPDATE members SET bans_count = 1 WHERE user_id = 3 AND chat_id = $1', [CHAT])
     expect(await json(await get(web, '/api/appeal', VECTORS.carol_appeal))).toEqual({ status: 'none', allowed: true })
-    const response = await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, {})
+    // Section 3.6.8: without the frog the button does nothing.
+    expect(await json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, {}))).toEqual({ status: 'check_required' })
+    expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toMatchObject({ state: 'open' })
+    const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal'`))[0].puzzle.slots as string[]
+    const response = await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.indexOf('frog') })
     expect(await response.json()).toEqual({ status: 'accepted', lifted: true })
     expect(h.jev.requests).toEqual([])
     expect(await karmaOf(h, ALICE.id)).toBe(12.5)
+  })
+
+  it('section 3.6.8: two misses fail the check without burning the button; a new check after 10 minutes', async () => {
+    await h.db.query(`INSERT INTO bans (chat_id, user_id, category, joke_idx, explanation_idx, image_idx, state, steam_until, created_at) VALUES ($1,3,'admin',0,0,0,'steam',$2,$2)`, [CHAT, h.clock.now()])
+    await h.db.query('UPDATE members SET bans_count = 1 WHERE user_id = 3 AND chat_id = $1', [CHAT])
+    const check = await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))
+    expect((check.puzzle as unknown[]).length).toBe(6)
+    const miss = async () => {
+      const slots = (await h.db.query(`SELECT puzzle FROM gate_checks WHERE user_id = 3 AND purpose = 'appeal' AND status = 'pending'`))[0].puzzle.slots as string[]
+      return json(await send(web, 'POST', '/api/appeal', VECTORS.carol_appeal, { pick: slots.findIndex((k) => k !== 'frog') }))
+    }
+    expect(await miss()).toMatchObject({ status: 'check_miss' })
+    expect(await miss()).toEqual({ status: 'check_failed' })
+    expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toEqual({ state: 'wait' })
+    expect(await json(await get(web, '/api/appeal', VECTORS.carol_appeal))).toEqual({ status: 'none', allowed: true })
+    h.clock.advance(10 * 60_000 + 1000)
+    expect(await json(await get(web, '/api/appeal/check', VECTORS.carol_appeal))).toMatchObject({ state: 'open' })
+    expect(h.tg.count('restrictChatMember')).toBe(0)
   })
 })
 
