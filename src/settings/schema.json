@@ -467,6 +467,20 @@
       "maximum": 366
     },
     {
+      "name": "join_gate",
+      "type": "boolean",
+      "default": false,
+      "nullable": false
+    },
+    {
+      "name": "join_gate_minutes",
+      "type": "integer",
+      "default": 10,
+      "nullable": false,
+      "minimum": 2,
+      "maximum": 60
+    },
+    {
       "name": "bots_in_rating",
       "type": "boolean",
       "default": false,
